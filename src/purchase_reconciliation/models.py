@@ -104,6 +104,7 @@ class Batch:
     updated_at: Optional[datetime] = None
     locked_by: Optional[str] = None
     lock_time: Optional[datetime] = None
+    scheme_name: Optional[str] = None
 
 @dataclass
 class AuditLog:
@@ -130,6 +131,48 @@ class ReconciliationRule:
     quantity_tolerance: float = 0.0
     amount_tolerance: float = 0.0
     allow_partial_appeal: bool = True
+
+@dataclass
+class RuleScheme:
+    name: str
+    business_line: str = ""
+    description: str = ""
+    quantity_tolerance: float = 0.0
+    amount_tolerance: float = 0.0
+    date_offset_days: int = 0
+    required_fields: List[str] = field(default_factory=list)
+    ignored_fields: List[str] = field(default_factory=list)
+    is_active: bool = False
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'name': self.name,
+            'business_line': self.business_line,
+            'description': self.description,
+            'quantity_tolerance': self.quantity_tolerance,
+            'amount_tolerance': self.amount_tolerance,
+            'date_offset_days': self.date_offset_days,
+            'required_fields': self.required_fields,
+            'ignored_fields': self.ignored_fields,
+            'is_active': self.is_active,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RuleScheme':
+        return cls(
+            name=data['name'],
+            business_line=data.get('business_line', ''),
+            description=data.get('description', ''),
+            quantity_tolerance=float(data.get('quantity_tolerance', 0.0)),
+            amount_tolerance=float(data.get('amount_tolerance', 0.0)),
+            date_offset_days=int(data.get('date_offset_days', 0)),
+            required_fields=data.get('required_fields', []),
+            ignored_fields=data.get('ignored_fields', []),
+            is_active=data.get('is_active', False),
+        )
 
 @dataclass
 class ValidationError:

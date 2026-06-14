@@ -4,7 +4,8 @@ from datetime import datetime
 from ..utils import read_supplier_bill, read_receiving_list, generate_batch_no
 from ..storage import (
     get_config, save_batch, save_diff_items, get_batch_by_no, get_all_batches,
-    get_diff_items_by_batch, add_audit_log, update_diff_item_status
+    get_diff_items_by_batch, add_audit_log, update_diff_item_status,
+    get_active_rule_scheme, get_rule_scheme
 )
 from ..models import DiffItem, Batch, BatchStatus, AppealStatus, OperatorRole
 from tabulate import tabulate
@@ -13,13 +14,21 @@ from tabulate import tabulate
 def batch_command():
     pass
 
+def apply_tolerance(quantity_diff: float, amount_diff: float, 
+                   quantity_tolerance: float, amount_tolerance: float) -> tuple:
+    qty_tolerated = abs(quantity_diff) <= quantity_tolerance if quantity_tolerance > 0 else False
+    amt_tolerated = abs(amount_diff) <= amount_tolerance if amount_tolerance > 0 else False
+    return qty_tolerated, amt_tolerated
+
 @batch_command.command(name='create')
 @click.option('--bill-file', '-b', type=click.Path(exists=True), help='供应商账单文件路径')
 @click.option('--receiving-file', '-r', type=click.Path(exists=True), help='收货清单文件路径')
 @click.option('--dry-run', '-d', is_flag=True, default=False, help='仅检查不入库')
 @click.option('--operator', '-o', required=True, help='操作人')
 @click.option('--role', '-R', required=True, help='操作者角色 (reviewer/approver/admin)')
-def create_batch(bill_file, receiving_file, dry_run, operator, role):
+@click.option('--scheme', '-s', help='使用的方案名称（不指定则使用激活方案）')
+@click.option('--no-scheme', is_flag=True, help='不使用任何方案，使用严格匹配')
+def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_scheme):
     if not OperatorRole.is_valid(role):
         click.echo(f"错误: 无效的角色 '{role}'")
         click.echo(f"有效角色: {[r.value for r in OperatorRole]}")
@@ -36,12 +45,33 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
         click.echo("错误: 请提供收货清单文件或先使用 import receiving 命令导入")
         return
     
+    active_scheme = None
+    scheme_name = None
+    if not no_scheme:
+        if scheme:
+            active_scheme = get_rule_scheme(scheme)
+            if not active_scheme:
+                click.echo(f"错误: 方案 '{scheme}' 不存在")
+                return
+        else:
+            active_scheme = get_active_rule_scheme()
+        if active_scheme:
+            scheme_name = active_scheme.name
+    
     try:
         bill_items = read_supplier_bill(bill_path)
         receive_items = read_receiving_list(receiving_path)
     except Exception as e:
         click.echo(f"错误: 读取文件失败 - {str(e)}")
         return
+    
+    quantity_tolerance = active_scheme.quantity_tolerance if active_scheme else 0.0
+    amount_tolerance = active_scheme.amount_tolerance if active_scheme else 0.0
+    
+    if active_scheme:
+        click.echo(f"\n使用方案: {active_scheme.name}")
+        click.echo(f"  数量容差: {quantity_tolerance}")
+        click.echo(f"  金额容差: {amount_tolerance}")
     
     bill_dict = {}
     for item in bill_items:
@@ -59,6 +89,7 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
     
     all_keys = set(bill_dict.keys()) | set(receive_dict.keys())
     diff_items = []
+    tolerated_count = 0
     
     for key in all_keys:
         bill_list = bill_dict.get(key, [])
@@ -69,7 +100,18 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
         bill_amt = sum(item.amount for item in bill_list)
         receive_amt = sum(item.amount for item in receive_list)
         
-        if bill_qty != receive_qty or bill_amt != receive_amt:
+        quantity_diff = bill_qty - receive_qty
+        amount_diff = bill_amt - receive_amt
+        
+        if abs(quantity_diff) > 0 or abs(amount_diff) > 0:
+            qty_tolerated, amt_tolerated = apply_tolerance(
+                quantity_diff, amount_diff, quantity_tolerance, amount_tolerance
+            )
+            
+            if qty_tolerated and amt_tolerated:
+                tolerated_count += 1
+                continue
+            
             supplier_code, item_code = key
             bill_no = bill_list[0].bill_no if bill_list else ''
             receive_no = receive_list[0].receive_no if receive_list else ''
@@ -83,10 +125,10 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
                 item_name=item_name,
                 bill_quantity=bill_qty,
                 receive_quantity=receive_qty,
-                quantity_diff=bill_qty - receive_qty,
+                quantity_diff=quantity_diff,
                 bill_amount=bill_amt,
                 receive_amount=receive_amt,
-                amount_diff=bill_amt - receive_amt,
+                amount_diff=amount_diff,
                 supplier_code=supplier_code,
                 supplier_name=supplier_name,
                 operator=operator,
@@ -94,8 +136,14 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
             ))
     
     if not diff_items:
-        click.echo("检查完成: 未发现差异，无需创建批次")
+        if tolerated_count > 0:
+            click.echo(f"\n检查完成: 所有 {tolerated_count} 条差异均被容差吸收，无需创建批次")
+        else:
+            click.echo("检查完成: 未发现差异，无需创建批次")
         return
+    
+    if tolerated_count > 0:
+        click.echo(f"容差放过的差异: {tolerated_count} 条")
     
     if dry_run:
         click.echo(f"\n[DRY-RUN] 发现 {len(diff_items)} 条差异记录，未创建批次")
@@ -116,18 +164,28 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role):
         return
     
     batch_no = generate_batch_no()
-    batch = Batch(batch_no=batch_no, status=BatchStatus.OPEN)
+    batch = Batch(batch_no=batch_no, status=BatchStatus.OPEN, scheme_name=scheme_name)
     batch_id = save_batch(batch)
     
     for item in diff_items:
         item.batch_id = batch_id
     save_diff_items(diff_items, batch_id)
     
-    add_audit_log(batch_id, batch_no, 'CREATE_BATCH', operator, role, note=f'创建批次，包含 {len(diff_items)} 条差异')
+    note = f'创建批次，包含 {len(diff_items)} 条差异'
+    if scheme_name:
+        note += f'，使用方案: {scheme_name}'
+    if tolerated_count > 0:
+        note += f'，容差放过: {tolerated_count} 条'
+    
+    add_audit_log(batch_id, batch_no, 'CREATE_BATCH', operator, role, note=note)
     
     click.echo(f"成功创建批次: {batch_no}")
     click.echo(f"批次ID: {batch_id}")
     click.echo(f"差异记录数: {len(diff_items)}")
+    if tolerated_count > 0:
+        click.echo(f"容差放过数: {tolerated_count}")
+    if scheme_name:
+        click.echo(f"使用方案: {scheme_name}")
     click.echo(f"操作人: {operator} | 角色: {role}")
 
 @batch_command.command(name='list')
@@ -145,10 +203,11 @@ def list_batches():
             batch.status.value,
             batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else '',
             batch.locked_by or '',
-            batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else ''
+            batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else '',
+            batch.scheme_name or '-'
         ])
     
-    headers = ['批次编号', '状态', '创建时间', '锁定人', '锁定时间']
+    headers = ['批次编号', '状态', '创建时间', '锁定人', '锁定时间', '方案']
     click.echo(tabulate(table_data, headers=headers))
 
 @batch_command.command(name='lock')
@@ -213,6 +272,7 @@ def show_batch(batch_no):
     click.echo(f"\n批次信息:")
     click.echo(f"  批次编号: {batch.batch_no}")
     click.echo(f"  状态: {batch.status.value}")
+    click.echo(f"  方案: {batch.scheme_name or '(无)'}")
     click.echo(f"  创建时间: {batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else ''}")
     click.echo(f"  锁定人: {batch.locked_by or '无'}")
     click.echo(f"  锁定时间: {batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else '无'}")
