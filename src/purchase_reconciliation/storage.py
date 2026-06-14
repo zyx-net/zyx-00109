@@ -614,6 +614,65 @@ def export_all_rule_schemes() -> List[Dict[str, Any]]:
     schemes = get_all_rule_schemes()
     return [scheme.to_dict() for scheme in schemes]
 
+def import_rule_schemes_atomic(schemes_data: List[Dict[str, Any]], 
+                               conflict_action: str = 'skip') -> tuple:
+    conn = get_connection()
+    cursor = conn.cursor()
+    imported = 0
+    skipped = 0
+    overwritten = 0
+    renamed = 0
+    errors = []
+    
+    try:
+        cursor.execute('BEGIN TRANSACTION')
+        
+        for data in schemes_data:
+            try:
+                scheme = RuleScheme.from_dict(data)
+                existing = get_rule_scheme(scheme.name)
+                
+                if existing:
+                    if conflict_action == 'overwrite':
+                        scheme.id = existing.id
+                        scheme.is_active = existing.is_active
+                        save_rule_scheme(scheme)
+                        overwritten += 1
+                    elif conflict_action == 'rename':
+                        base_name = scheme.name
+                        counter = 1
+                        while get_rule_scheme(scheme.name):
+                            scheme.name = f"{base_name}_imported_{counter}"
+                            counter += 1
+                        scheme.is_active = False
+                        save_rule_scheme(scheme)
+                        renamed += 1
+                    else:
+                        skipped += 1
+                else:
+                    scheme.is_active = False
+                    save_rule_scheme(scheme)
+                    imported += 1
+            except Exception as e:
+                errors.append(f"处理方案 '{data.get('name', '未知')}' 时出错: {str(e)}")
+        
+        if errors:
+            cursor.execute('ROLLBACK')
+            conn.commit()
+            return imported, skipped, overwritten, renamed, errors
+        
+        cursor.execute('COMMIT')
+        conn.commit()
+        return imported, skipped, overwritten, renamed, errors
+        
+    except Exception as e:
+        cursor.execute('ROLLBACK')
+        conn.commit()
+        errors.append(f"事务执行失败: {str(e)}")
+        return imported, skipped, overwritten, renamed, errors
+    finally:
+        conn.close()
+
 def import_rule_schemes(schemes_data: List[Dict[str, Any]], 
                         conflict_action: str = 'skip') -> tuple:
     imported = 0

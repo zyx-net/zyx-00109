@@ -5,9 +5,23 @@ from tabulate import tabulate
 from ..storage import (
     save_rule_scheme, get_rule_scheme, get_all_rule_schemes,
     get_active_rule_scheme, set_active_rule_scheme, delete_rule_scheme,
-    export_all_rule_schemes, import_rule_schemes, get_config
+    export_all_rule_schemes, import_rule_schemes_atomic, get_config
 )
 from ..models import RuleScheme
+
+def read_json_file_with_bom(file_path):
+    with open(file_path, 'rb') as f:
+        raw_content = f.read()
+    
+    if raw_content.startswith(b'\xef\xbb\xbf'):
+        content = raw_content.decode('utf-8-sig')
+    else:
+        try:
+            content = raw_content.decode('utf-8')
+        except UnicodeDecodeError:
+            content = raw_content.decode('utf-8-sig')
+    
+    return json.loads(content)
 
 @click.group(name='scheme')
 def scheme_command():
@@ -201,17 +215,63 @@ def export_schemes(output):
               type=click.Choice(['overwrite', 'skip', 'rename'], case_sensitive=False),
               default='skip',
               help='遇到同名方案时的处理方式: overwrite(覆盖), skip(跳过), rename(改名)')
-def import_schemes(file, conflict):
+@click.option('--dry-run', '-d', is_flag=True, help='仅预览导入结果，不实际写入')
+def import_schemes(file, conflict, dry_run):
     try:
-        with open(file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        data = read_json_file_with_bom(file)
         
         schemes_data = data.get('schemes', [])
         if not schemes_data:
             click.echo("文件中没有找到方案数据")
             return
         
-        imported, skipped, overwritten, renamed = import_rule_schemes(schemes_data, conflict)
+        existing_names = [s.name for s in get_all_rule_schemes()]
+        
+        preview_results = []
+        for item in schemes_data:
+            scheme = RuleScheme.from_dict(item)
+            action = 'new'
+            final_name = scheme.name
+            if scheme.name in existing_names:
+                if conflict == 'skip':
+                    action = 'skip'
+                elif conflict == 'overwrite':
+                    action = 'overwrite'
+                elif conflict == 'rename':
+                    action = 'rename'
+                    base_name = scheme.name
+                    counter = 1
+                    while f"{base_name}_imported_{counter}" in existing_names:
+                        counter += 1
+                    final_name = f"{base_name}_imported_{counter}"
+            preview_results.append({
+                'original': scheme.name,
+                'action': action,
+                'final_name': final_name,
+                'quantity_tolerance': scheme.quantity_tolerance,
+                'amount_tolerance': scheme.amount_tolerance
+            })
+        
+        click.echo(f"导入预览 ({len(preview_results)} 个方案):")
+        click.echo("-" * 70)
+        for i, r in enumerate(preview_results, 1):
+            action_zh = {'new': '新增', 'skip': '跳过', 'overwrite': '覆盖', 'rename': '改名'}.get(r['action'], r['action'])
+            click.echo(f"  {i}. {r['original']} -> {action_zh} -> {r['final_name']} (数量容差:{r['quantity_tolerance']}, 金额容差:{r['amount_tolerance']})")
+        
+        if dry_run:
+            click.echo("-" * 70)
+            click.echo("[DRY-RUN] 预览完成，未实际导入")
+            return
+        
+        click.echo("-" * 70)
+        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, conflict)
+        
+        if errors:
+            click.echo(f"\n导入过程中发生 {len(errors)} 个错误:")
+            for err in errors:
+                click.echo(f"  - {err}")
+            click.echo("\n回滚已完成，数据库状态未改变")
+            return
         
         click.echo(f"导入完成:")
         click.echo(f"  新增: {imported}")
@@ -219,8 +279,8 @@ def import_schemes(file, conflict):
         click.echo(f"  覆盖: {overwritten}")
         click.echo(f"  改名: {renamed}")
         
-    except json.JSONDecodeError:
-        click.echo(f"错误: 文件格式不正确，无法解析 JSON")
+    except json.JSONDecodeError as e:
+        click.echo(f"错误: 文件格式不正确，无法解析 JSON - {str(e)}")
     except Exception as e:
         click.echo(f"错误: 导入失败 - {str(e)}")
 

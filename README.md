@@ -257,13 +257,39 @@ purchase-recon audit summary
 | --ignored-fields | -i | 忽略字段（可多次指定） |
 | --set-active | - | 创建后设为激活方案 |
 
-## 规则快照功能
+##### 方案导入导出
+
+```bash
+# 导出所有方案
+purchase-recon scheme export -o output/schemes.json
+
+# 导入方案（预览模式，不实际写入）
+purchase-recon scheme import -f output/schemes.json --dry-run
+
+# 导入方案（跳过同名方案）
+purchase-recon scheme import -f output/schemes.json -c skip
+
+# 导入方案（覆盖同名方案）
+purchase-recon scheme import -f output/schemes.json -c overwrite
+
+# 导入方案（重命名同名方案）
+purchase-recon scheme import -f output/schemes.json -c rename
+```
+
+### 规则快照功能
 
 创建批次时，系统会自动保存当前生效方案的规则快照到批次记录中。这意味着：
 
 1. **跨重启可追溯**: 即使方案被修改或删除，历史批次仍然保留创建时的规则快照
 2. **复查无忧**: 查看批次时可以看到创建时使用的具体规则参数
 3. **日志完整**: 申诉列表、审计日志等都会显示对应的规则快照
+
+### 方案导入特性
+
+- **UTF-8 BOM 兼容**: 自动识别并处理带 BOM 的 UTF-8 JSON 文件
+- **原子性导入**: 使用事务确保导入失败时回滚，不会留下半截数据
+- **冲突处理**: 支持覆盖、跳过、改名三种方式处理同名方案
+- **预览功能**: 使用 `--dry-run` 可以预览导入效果，不实际写入
 
 ### 规则快照包含的信息
 

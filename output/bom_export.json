@@ -1,0 +1,362 @@
+{
+  "version": "1.0",
+  "exported_at": "2026-06-15T05:57:07.281236",
+  "schemes": [
+    {
+      "name": "active_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "bom_test_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 100.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": true
+    },
+    {
+      "name": "conflict_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 1.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "date_test",
+      "business_line": "",
+      "description": "日期偏移测试",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 5,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "export_test_1",
+      "business_line": "华南区",
+      "description": "",
+      "quantity_tolerance": 0.5,
+      "amount_tolerance": 25.0,
+      "date_offset_days": 1,
+      "required_fields": [
+        "item_code"
+      ],
+      "ignored_fields": [
+        "item_name"
+      ],
+      "is_active": false
+    },
+    {
+      "name": "export_test_2",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 1.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "ignore_supplier",
+      "business_line": "",
+      "description": "忽略供应商字段",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [
+        "supplier_code"
+      ],
+      "is_active": false
+    },
+    {
+      "name": "inactive_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "loose_date_match",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 3,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "new_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "overwrite_test",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 50.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "rename_test",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 1.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "rename_test_imported_1",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 30.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_date0",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_ignore_supplier",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [
+        "supplier_code"
+      ],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_loose_tolerance",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 500.0,
+      "date_offset_days": 5,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_p04_strict",
+      "business_line": "",
+      "description": "review strict",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 5,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_required",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [
+        "reviewer_missing_required"
+      ],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_strict_zero",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "reviewer_tol",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 50.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "scheme_1",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "scheme_2",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "scheme_a",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 1.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "scheme_b",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "strict_date_match",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "strict_test",
+      "business_line": "",
+      "description": "严格模式",
+      "quantity_tolerance": 0.0,
+      "amount_tolerance": 0.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "test_scheme",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 1.0,
+      "amount_tolerance": 50.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "test_scheme_1",
+      "business_line": "华东区",
+      "description": "测试方案",
+      "quantity_tolerance": 1.5,
+      "amount_tolerance": 100.0,
+      "date_offset_days": 3,
+      "required_fields": [
+        "bill_no",
+        "item_code"
+      ],
+      "ignored_fields": [
+        "unit_price"
+      ],
+      "is_active": false
+    },
+    {
+      "name": "test_scheme_update",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 75.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "test_tolerance",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 500.0,
+      "date_offset_days": 0,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    },
+    {
+      "name": "test_tolerance_loose",
+      "business_line": "",
+      "description": "",
+      "quantity_tolerance": 2.0,
+      "amount_tolerance": 500.0,
+      "date_offset_days": 5,
+      "required_fields": [],
+      "ignored_fields": [],
+      "is_active": false
+    }
+  ]
+}

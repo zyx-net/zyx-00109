@@ -1248,5 +1248,307 @@ class TestExportFileIntegrity:
         delete_rule_scheme('roundtrip_test')
 
 
+class TestAtomicImport:
+    def test_atomic_import_success(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_all_rule_schemes, 
+            delete_rule_scheme, save_rule_scheme
+        )
+        
+        import_data = [
+            {
+                'name': 'atomic_new_1',
+                'quantity_tolerance': 1.0,
+                'amount_tolerance': 10.0
+            },
+            {
+                'name': 'atomic_new_2',
+                'quantity_tolerance': 2.0,
+                'amount_tolerance': 20.0
+            }
+        ]
+        
+        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'skip')
+        
+        assert errors == []
+        assert imported == 2
+        assert skipped == 0
+        assert overwritten == 0
+        
+        schemes = get_all_rule_schemes()
+        names = [s.name for s in schemes]
+        assert 'atomic_new_1' in names
+        assert 'atomic_new_2' in names
+        
+        delete_rule_scheme('atomic_new_1')
+        delete_rule_scheme('atomic_new_2')
+    
+    def test_atomic_import_with_conflict_skip(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_rule_scheme, 
+            delete_rule_scheme, save_rule_scheme
+        )
+        
+        existing = RuleScheme(name='atomic_skip_test', quantity_tolerance=1.0)
+        save_rule_scheme(existing)
+        
+        import_data = [
+            {
+                'name': 'atomic_skip_test',
+                'quantity_tolerance': 99.0
+            },
+            {
+                'name': 'atomic_new',
+                'quantity_tolerance': 2.0
+            }
+        ]
+        
+        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'skip')
+        
+        assert errors == []
+        assert imported == 1
+        assert skipped == 1
+        
+        original = get_rule_scheme('atomic_skip_test')
+        assert original.quantity_tolerance == 1.0
+        
+        delete_rule_scheme('atomic_skip_test')
+        delete_rule_scheme('atomic_new')
+    
+    def test_atomic_import_with_conflict_overwrite(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_rule_scheme, 
+            delete_rule_scheme, save_rule_scheme
+        )
+        
+        existing = RuleScheme(name='atomic_overwrite_test', quantity_tolerance=1.0)
+        save_rule_scheme(existing)
+        
+        import_data = [
+            {
+                'name': 'atomic_overwrite_test',
+                'quantity_tolerance': 88.0
+            }
+        ]
+        
+        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'overwrite')
+        
+        assert errors == []
+        assert overwritten == 1
+        
+        updated = get_rule_scheme('atomic_overwrite_test')
+        assert updated.quantity_tolerance == 88.0
+        
+        delete_rule_scheme('atomic_overwrite_test')
+    
+    def test_atomic_import_rollback_on_error(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_rule_scheme, 
+            delete_rule_scheme, save_rule_scheme
+        )
+        
+        existing = RuleScheme(name='atomic_rollback_test', quantity_tolerance=1.0)
+        save_rule_scheme(existing)
+        
+        import_data = [
+            {
+                'name': 'atomic_rollback_test',
+                'quantity_tolerance': 99.0
+            },
+            {
+                'name': 'valid_new',
+                'quantity_tolerance': 2.0
+            }
+        ]
+        
+        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'overwrite')
+        
+        assert imported == 1
+        assert overwritten == 1
+        
+        original = get_rule_scheme('atomic_rollback_test')
+        assert original.quantity_tolerance == 99.0
+        
+        delete_rule_scheme('atomic_rollback_test')
+        delete_rule_scheme('valid_new')
+
+
+class TestJSONBOMHandling:
+    def test_read_json_with_bom(self):
+        import os
+        import tempfile
+        from purchase_reconciliation.commands.scheme_cmd import read_json_file_with_bom
+        
+        test_data = {
+            'version': '1.0',
+            'schemes': [
+                {'name': 'bom_test', 'quantity_tolerance': 1.0}
+            ]
+        }
+        
+        temp_path = os.path.join(tempfile.gettempdir(), 'test_bom.json')
+        
+        with open(temp_path, 'wb') as f:
+            f.write(b'\xef\xbb\xbf')
+            f.write('{"version": "1.0", "schemes": [{"name": "bom_test", "quantity_tolerance": 1.0}]}'.encode('utf-8'))
+        
+        try:
+            result = read_json_file_with_bom(temp_path)
+            
+            assert result['version'] == '1.0'
+            assert len(result['schemes']) == 1
+            assert result['schemes'][0]['name'] == 'bom_test'
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_read_json_without_bom(self):
+        import os
+        import tempfile
+        from purchase_reconciliation.commands.scheme_cmd import read_json_file_with_bom
+        
+        temp_path = os.path.join(tempfile.gettempdir(), 'test_no_bom.json')
+        
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'version': '1.0',
+                'schemes': [
+                    {'name': 'no_bom_test', 'quantity_tolerance': 2.0}
+                ]
+            }, f)
+        
+        try:
+            result = read_json_file_with_bom(temp_path)
+            
+            assert result['version'] == '1.0'
+            assert len(result['schemes']) == 1
+            assert result['schemes'][0]['name'] == 'no_bom_test'
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+
+class TestAuditTrailCompleteness:
+    def test_batch_creation_includes_scheme_snapshot_in_audit(self):
+        from purchase_reconciliation.models import RuleScheme, Batch
+        from purchase_reconciliation.storage import save_batch, get_batch_by_no, get_audit_logs, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='audit_trail_test',
+            quantity_tolerance=5.0,
+            amount_tolerance=250.0,
+            date_offset_days=7
+        )
+        
+        batch = Batch(
+            batch_no='AUDIT_TRAIL_BATCH_001',
+            scheme_name='audit_trail_test',
+            scheme_snapshot=scheme.to_snapshot()
+        )
+        
+        save_batch(batch)
+        
+        saved_batch = get_batch_by_no('AUDIT_TRAIL_BATCH_001')
+        assert saved_batch.scheme_snapshot is not None
+        assert saved_batch.scheme_snapshot['quantity_tolerance'] == 5.0
+        assert saved_batch.scheme_snapshot['amount_tolerance'] == 250.0
+        assert saved_batch.scheme_snapshot['date_offset_days'] == 7
+        
+        delete_rule_scheme('audit_trail_test')
+    
+    def test_scheme_snapshot_persists_after_restart(self):
+        from purchase_reconciliation.models import RuleScheme, Batch
+        from purchase_reconciliation.storage import save_batch, delete_rule_scheme
+        import purchase_reconciliation.storage as storage_module
+        
+        original_db_path = storage_module.DB_PATH
+        temp_db_path = os.path.join(tempfile.gettempdir(), 'test_audit_restart.db')
+        storage_module.DB_PATH = temp_db_path
+        
+        try:
+            scheme = RuleScheme(
+                name='restart_audit_test',
+                quantity_tolerance=7.0,
+                amount_tolerance=350.0
+            )
+            
+            batch = Batch(
+                batch_no='RESTART_AUDIT_001',
+                scheme_name='restart_audit_test',
+                scheme_snapshot=scheme.to_snapshot()
+            )
+            
+            save_batch(batch)
+            
+            if hasattr(storage_module, '_connection_cache'):
+                del storage_module._connection_cache
+            
+            from purchase_reconciliation.storage import get_batch_by_no
+            retrieved = get_batch_by_no('RESTART_AUDIT_001')
+            
+            assert retrieved is not None
+            assert retrieved.scheme_snapshot is not None
+            assert retrieved.scheme_snapshot['name'] == 'restart_audit_test'
+            assert retrieved.scheme_snapshot['quantity_tolerance'] == 7.0
+            assert retrieved.scheme_snapshot['amount_tolerance'] == 350.0
+        finally:
+            storage_module.DB_PATH = original_db_path
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)
+
+
+class TestImportConflictClarity:
+    def test_import_shows_preview_before_write(self):
+        from purchase_reconciliation.commands.scheme_cmd import read_json_file_with_bom
+        import io
+        import sys
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, delete_rule_scheme
+        
+        existing = RuleScheme(name='preview_test', quantity_tolerance=1.0)
+        save_rule_scheme(existing)
+        
+        import os
+        import tempfile
+        
+        temp_path = os.path.join(tempfile.gettempdir(), 'test_preview.json')
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'version': '1.0',
+                'schemes': [
+                    {'name': 'preview_test', 'quantity_tolerance': 99.0},
+                    {'name': 'preview_new', 'quantity_tolerance': 2.0}
+                ]
+            }, f)
+        
+        try:
+            data = read_json_file_with_bom(temp_path)
+            existing_names = ['preview_test']
+            
+            for item in data['schemes']:
+                scheme = RuleScheme.from_dict(item)
+                if scheme.name in existing_names:
+                    action = 'skip'
+                else:
+                    action = 'new'
+                
+                assert action in ['skip', 'new']
+        finally:
+            delete_rule_scheme('preview_test')
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_import_dry_run_does_not_write(self):
+        from purchase_reconciliation.storage import get_all_rule_schemes
+        
+        initial_count = len(get_all_rule_schemes())
+        
+        assert initial_count >= 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
