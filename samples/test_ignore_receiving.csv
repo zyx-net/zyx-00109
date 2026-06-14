@@ -1,0 +1,2 @@
+receive_no,item_code,item_name,quantity,unit_price,amount,receive_date,supplier_code,supplier_name,purchase_order_no
+R201,M201,物料E,40,60,2400,2024-02-01,S201,供应商E,P201

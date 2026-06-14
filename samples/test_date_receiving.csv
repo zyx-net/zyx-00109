@@ -1,0 +1,3 @@
+receive_no,item_code,item_name,quantity,unit_price,amount,receive_date,supplier_code,supplier_name,purchase_order_no
+R101,M101,物料C,15,100,1500,2024-01-22,S101,供应商C,P101
+R102,M102,物料D,25,80,2000,2024-01-05,S101,供应商C,P102

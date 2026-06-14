@@ -1,0 +1,2 @@
+bill_no,item_code,item_name,quantity,unit_price,amount,bill_date,supplier_code,supplier_name
+B301,M301,物料F,35,100,3500,2024-01-01,S301,供应商G

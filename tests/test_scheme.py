@@ -496,5 +496,190 @@ class TestCLIHelpExamples:
         assert 'no_scheme' in param_names
 
 
+class TestRuleValidationFunctions:
+    def test_validate_bill_with_custom_required_fields(self):
+        import tempfile
+        import os
+        from purchase_reconciliation.utils import validate_bill_with_required_fields
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write('bill_no,item_code,item_name,quantity,unit_price,amount,bill_date,supplier_code,supplier_name\n')
+            f.write('B001,M001,物料A,10,100,1000,2024-01-15,S001,供应商A\n')
+            temp_path = f.name
+        
+        try:
+            result = validate_bill_with_required_fields(temp_path, custom_required_fields=['item_code'])
+            assert len(result.errors) == 0
+            assert len(result.valid_rows) == 1
+            
+            result = validate_bill_with_required_fields(temp_path, custom_required_fields=['bill_no', 'item_code'])
+            assert len(result.errors) == 0
+            
+            result = validate_bill_with_required_fields(temp_path, custom_required_fields=['nonexistent_field'])
+            assert len(result.errors) > 0
+            assert any(e.error_type == 'MISSING_FIELD' for e in result.errors)
+        finally:
+            os.unlink(temp_path)
+    
+    def test_validate_receiving_with_custom_required_fields(self):
+        import tempfile
+        import os
+        from purchase_reconciliation.utils import validate_receiving_with_required_fields
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write('receive_no,item_code,item_name,quantity,unit_price,amount,receive_date,supplier_code,supplier_name,purchase_order_no\n')
+            f.write('R001,M001,物料A,10,100,1000,2024-01-15,S001,供应商A,P001\n')
+            temp_path = f.name
+        
+        try:
+            result = validate_receiving_with_required_fields(temp_path, custom_required_fields=['item_code'])
+            assert len(result.errors) == 0
+            assert len(result.valid_rows) == 1
+            
+            result = validate_receiving_with_required_fields(temp_path, custom_required_fields=['item_code', 'nonexistent'])
+            assert len(result.errors) > 0
+        finally:
+            os.unlink(temp_path)
+    
+    def test_validate_missing_required_field(self):
+        import tempfile
+        import os
+        from purchase_reconciliation.utils import validate_bill_with_required_fields
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write('bill_no,item_code,item_name,quantity,unit_price,amount,bill_date,supplier_code,supplier_name\n')
+            f.write('B001,M001,物料A,,100,1000,2024-01-15,S001,供应商A\n')
+            temp_path = f.name
+        
+        try:
+            result = validate_bill_with_required_fields(temp_path, custom_required_fields=['quantity'])
+            assert len(result.errors) > 0
+            assert any(e.error_type == 'EMPTY_FIELD' and e.field == 'quantity' for e in result.errors)
+        finally:
+            os.unlink(temp_path)
+    
+    def test_check_date_offset_zero(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-15', 0)
+        assert in_offset == True
+    
+    def test_check_date_offset_within_range(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-20', 5)
+        assert in_offset == True
+        
+        in_offset, reason = check_date_offset('2024-01-20', '2024-01-15', 5)
+        assert in_offset == True
+    
+    def test_check_date_offset_beyond_range(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-25', 5)
+        assert in_offset == False
+        assert '超出偏移' in reason
+    
+    def test_check_date_offset_negative_offset(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-20', '2024-01-15', -5)
+        assert in_offset == True
+    
+    def test_check_date_offset_unparseable(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('invalid', '2024-01-15', 5)
+        assert in_offset == False
+    
+    def test_build_matching_key_no_ignored(self):
+        from purchase_reconciliation.utils import build_matching_key
+        
+        item = {
+            'supplier_code': 'S001',
+            'item_code': 'M001',
+            'supplier_name': '供应商A',
+            'bill_no': 'B001',
+            'receive_no': 'R001'
+        }
+        
+        key = build_matching_key(item, [])
+        assert key == ('S001', 'M001', '供应商A')
+    
+    def test_build_matching_key_with_ignored(self):
+        from purchase_reconciliation.utils import build_matching_key
+        
+        item = {
+            'supplier_code': 'S001',
+            'item_code': 'M001',
+            'supplier_name': '供应商A',
+            'bill_no': 'B001',
+            'receive_no': 'R001'
+        }
+        
+        key = build_matching_key(item, ['supplier_code'])
+        assert key == ('M001',)
+        
+        key = build_matching_key(item, ['supplier_code', 'supplier_name'])
+        assert key == ('M001',)
+    
+    def test_build_matching_key_ignore_supplier_matches_different_suppliers(self):
+        from purchase_reconciliation.utils import build_matching_key
+        
+        item1 = {
+            'supplier_code': 'S001',
+            'item_code': 'M001',
+            'supplier_name': '供应商A',
+            'bill_no': 'B001',
+            'receive_no': 'R001'
+        }
+        item2 = {
+            'supplier_code': 'S002',
+            'item_code': 'M001',
+            'supplier_name': '供应商B',
+            'bill_no': 'B002',
+            'receive_no': 'R002'
+        }
+        
+        key1 = build_matching_key(item1, ['supplier_code', 'supplier_name'])
+        key2 = build_matching_key(item2, ['supplier_code', 'supplier_name'])
+        
+        assert key1 == key2
+        assert key1 == ('M001',)
+
+
+class TestRuleSchemeIntegration:
+    def test_scheme_persistence_with_all_fields(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='full_feature_scheme',
+            business_line='测试业务线',
+            description='完整功能测试',
+            quantity_tolerance=1.5,
+            amount_tolerance=100.0,
+            date_offset_days=3,
+            required_fields=['bill_no', 'item_code', 'quantity'],
+            ignored_fields=['supplier_code', 'supplier_name'],
+            is_active=False
+        )
+        
+        save_rule_scheme(scheme)
+        retrieved = get_rule_scheme('full_feature_scheme')
+        
+        assert retrieved is not None
+        assert retrieved.business_line == '测试业务线'
+        assert retrieved.description == '完整功能测试'
+        assert retrieved.quantity_tolerance == 1.5
+        assert retrieved.amount_tolerance == 100.0
+        assert retrieved.date_offset_days == 3
+        assert retrieved.required_fields == ['bill_no', 'item_code', 'quantity']
+        assert retrieved.ignored_fields == ['supplier_code', 'supplier_name']
+        
+        delete_rule_scheme('full_feature_scheme')
+        assert get_rule_scheme('full_feature_scheme') is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
