@@ -105,6 +105,22 @@ class Batch:
     locked_by: Optional[str] = None
     lock_time: Optional[datetime] = None
     scheme_name: Optional[str] = None
+    scheme_snapshot: Optional[Dict[str, Any]] = None
+
+    def get_scheme_snapshot_summary(self) -> str:
+        if not self.scheme_snapshot:
+            return "(无)"
+        snap = self.scheme_snapshot
+        parts = [f"方案:{snap.get('name', '未知')}"]
+        parts.append(f"数量容差±{snap.get('quantity_tolerance', 0)}")
+        parts.append(f"金额容差±{snap.get('amount_tolerance', 0)}")
+        if snap.get('date_offset_days', 0) != 0:
+            parts.append(f"日期偏移{snap.get('date_offset_days')}天")
+        if snap.get('required_fields'):
+            parts.append(f"必填:{','.join(snap['required_fields'])}")
+        if snap.get('ignored_fields'):
+            parts.append(f"忽略:{','.join(snap['ignored_fields'])}")
+        return "; ".join(parts)
 
 @dataclass
 class AuditLog:
@@ -159,6 +175,28 @@ class RuleScheme:
             'ignored_fields': self.ignored_fields,
             'is_active': self.is_active,
         }
+
+    def to_snapshot(self) -> Dict[str, Any]:
+        return {
+            'name': self.name,
+            'business_line': self.business_line,
+            'description': self.description,
+            'quantity_tolerance': self.quantity_tolerance,
+            'amount_tolerance': self.amount_tolerance,
+            'date_offset_days': self.date_offset_days,
+            'required_fields': list(self.required_fields),
+            'ignored_fields': list(self.ignored_fields),
+        }
+
+    def get_snapshot_summary(self) -> str:
+        parts = [f"数量容差±{self.quantity_tolerance}", f"金额容差±{self.amount_tolerance}"]
+        if self.date_offset_days != 0:
+            parts.append(f"日期偏移{self.date_offset_days}天")
+        if self.required_fields:
+            parts.append(f"必填:{','.join(self.required_fields)}")
+        if self.ignored_fields:
+            parts.append(f"忽略:{','.join(self.ignored_fields)}")
+        return "; ".join(parts)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'RuleScheme':

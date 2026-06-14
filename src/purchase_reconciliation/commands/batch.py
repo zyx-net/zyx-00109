@@ -51,6 +51,7 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_
     
     active_scheme = None
     scheme_name = None
+    scheme_snapshot = None
     if not no_scheme:
         if scheme:
             active_scheme = get_rule_scheme(scheme)
@@ -61,6 +62,7 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_
             active_scheme = get_active_rule_scheme()
         if active_scheme:
             scheme_name = active_scheme.name
+            scheme_snapshot = active_scheme.to_snapshot()
     
     bill_required_fields = active_scheme.required_fields if active_scheme and active_scheme.required_fields else None
     receive_required_fields = active_scheme.required_fields if active_scheme and active_scheme.required_fields else None
@@ -233,7 +235,7 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_
         return
     
     batch_no = generate_batch_no()
-    batch = Batch(batch_no=batch_no, status=BatchStatus.OPEN, scheme_name=scheme_name)
+    batch = Batch(batch_no=batch_no, status=BatchStatus.OPEN, scheme_name=scheme_name, scheme_snapshot=scheme_snapshot)
     batch_id = save_batch(batch)
     
     for item in diff_items:
@@ -269,19 +271,10 @@ def list_batches():
         click.echo("暂无批次")
         return
     
-    table_data = []
+    click.echo("\n批次列表 (方案规则快照):")
     for batch in batches:
-        table_data.append([
-            batch.batch_no,
-            batch.status.value,
-            batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else '',
-            batch.locked_by or '',
-            batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else '',
-            batch.scheme_name or '-'
-        ])
-    
-    headers = ['批次编号', '状态', '创建时间', '锁定人', '锁定时间', '方案']
-    click.echo(tabulate(table_data, headers=headers))
+        scheme_info = batch.get_scheme_snapshot_summary() if batch.scheme_snapshot else "(无)"
+        click.echo(f"  {batch.batch_no} | {batch.status.value} | {scheme_info}")
 
 @batch_command.command(name='lock')
 @click.option('--batch-no', '-b', required=True, help='批次编号')
@@ -346,6 +339,8 @@ def show_batch(batch_no):
     click.echo(f"  批次编号: {batch.batch_no}")
     click.echo(f"  状态: {batch.status.value}")
     click.echo(f"  方案: {batch.scheme_name or '(无)'}")
+    if batch.scheme_snapshot:
+        click.echo(f"  规则快照: {batch.get_scheme_snapshot_summary()}")
     click.echo(f"  创建时间: {batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else ''}")
     click.echo(f"  锁定人: {batch.locked_by or '无'}")
     click.echo(f"  锁定时间: {batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else '无'}")

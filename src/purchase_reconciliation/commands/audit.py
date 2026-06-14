@@ -11,6 +11,7 @@ def audit_command():
 @click.option('--batch-no', '-b', help='批次编号（不指定则显示所有）')
 def list_audit(batch_no):
     batch_id = None
+    batch = None
     
     if batch_no:
         batch = get_batch_by_no(batch_no)
@@ -24,6 +25,10 @@ def list_audit(batch_no):
     if not logs:
         click.echo("暂无审计日志")
         return
+    
+    if batch and batch.scheme_snapshot:
+        click.echo(f"批次 {batch_no} 规则快照: {batch.get_scheme_snapshot_summary()}")
+        click.echo("")
     
     table_data = []
     for log in logs:

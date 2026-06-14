@@ -218,6 +218,9 @@ def list_appeals(batch_no):
         click.echo(f"批次 {batch_no} 没有差异记录")
         return
     
+    if batch.scheme_snapshot:
+        click.echo(f"\n批次 {batch_no} 规则快照: {batch.get_scheme_snapshot_summary()}")
+    
     table_data = []
     for item in items:
         table_data.append([

@@ -24,7 +24,8 @@ def init_db():
             updated_at TEXT NOT NULL,
             locked_by TEXT,
             lock_time TEXT,
-            scheme_name TEXT
+            scheme_name TEXT,
+            scheme_snapshot TEXT
         )
     ''')
     
@@ -107,6 +108,13 @@ def init_db():
     if 'operator_role' not in audit_cols:
         cursor.execute("ALTER TABLE audit_logs ADD COLUMN operator_role TEXT DEFAULT ''")
     
+    cursor.execute("PRAGMA table_info(batches)")
+    batch_cols = [col[1] for col in cursor.fetchall()]
+    if 'scheme_name' not in batch_cols:
+        cursor.execute("ALTER TABLE batches ADD COLUMN scheme_name TEXT DEFAULT ''")
+    if 'scheme_snapshot' not in batch_cols:
+        cursor.execute("ALTER TABLE batches ADD COLUMN scheme_snapshot TEXT DEFAULT ''")
+    
     conn.commit()
     conn.close()
 
@@ -119,19 +127,23 @@ def save_batch(batch: Batch) -> int:
     cursor = conn.cursor()
     now = datetime.now().isoformat()
     
+    scheme_snapshot_json = json.dumps(batch.scheme_snapshot) if batch.scheme_snapshot else ''
+    
     if batch.id is None:
         cursor.execute('''
-            INSERT INTO batches (batch_no, status, created_at, updated_at, scheme_name)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (batch.batch_no, batch.status.value, now, now, batch.scheme_name))
+            INSERT INTO batches (batch_no, status, created_at, updated_at, locked_by, lock_time, scheme_name, scheme_snapshot)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (batch.batch_no, batch.status.value, now, now, batch.locked_by, 
+              batch.lock_time.isoformat() if batch.lock_time else None,
+              batch.scheme_name, scheme_snapshot_json))
         batch.id = cursor.lastrowid
     else:
         cursor.execute('''
-            UPDATE batches SET status=?, updated_at=?, locked_by=?, lock_time=?, scheme_name=?
+            UPDATE batches SET status=?, updated_at=?, locked_by=?, lock_time=?, scheme_name=?, scheme_snapshot=?
             WHERE id=?
         ''', (batch.status.value, now, batch.locked_by, 
               batch.lock_time.isoformat() if batch.lock_time else None,
-              batch.scheme_name, batch.id))
+              batch.scheme_name, scheme_snapshot_json, batch.id))
     
     conn.commit()
     conn.close()
@@ -142,7 +154,7 @@ def get_batch_by_no(batch_no: str) -> Optional[Batch]:
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, batch_no, status, created_at, updated_at, locked_by, lock_time, scheme_name
+        SELECT id, batch_no, status, created_at, updated_at, locked_by, lock_time, scheme_name, scheme_snapshot
         FROM batches WHERE batch_no = ?
     ''', (batch_no,))
     
@@ -150,6 +162,12 @@ def get_batch_by_no(batch_no: str) -> Optional[Batch]:
     conn.close()
     
     if row:
+        scheme_snapshot = None
+        if len(row) > 8 and row[8]:
+            try:
+                scheme_snapshot = json.loads(row[8])
+            except:
+                pass
         return Batch(
             batch_no=row[1],
             id=row[0],
@@ -158,7 +176,8 @@ def get_batch_by_no(batch_no: str) -> Optional[Batch]:
             updated_at=datetime.fromisoformat(row[4]),
             locked_by=row[5],
             lock_time=datetime.fromisoformat(row[6]) if row[6] else None,
-            scheme_name=row[7] if len(row) > 7 else None
+            scheme_name=row[7] if len(row) > 7 else None,
+            scheme_snapshot=scheme_snapshot
         )
     return None
 
@@ -167,15 +186,22 @@ def get_all_batches() -> List[Batch]:
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, batch_no, status, created_at, updated_at, locked_by, lock_time, scheme_name
+        SELECT id, batch_no, status, created_at, updated_at, locked_by, lock_time, scheme_name, scheme_snapshot
         FROM batches ORDER BY created_at DESC
     ''')
     
     rows = cursor.fetchall()
     conn.close()
     
-    return [
-        Batch(
+    result = []
+    for row in rows:
+        scheme_snapshot = None
+        if len(row) > 8 and row[8]:
+            try:
+                scheme_snapshot = json.loads(row[8])
+            except:
+                pass
+        result.append(Batch(
             batch_no=row[1],
             id=row[0],
             status=BatchStatus(row[2]),
@@ -183,9 +209,10 @@ def get_all_batches() -> List[Batch]:
             updated_at=datetime.fromisoformat(row[4]),
             locked_by=row[5],
             lock_time=datetime.fromisoformat(row[6]) if row[6] else None,
-            scheme_name=row[7] if len(row) > 7 else None
-        ) for row in rows
-    ]
+            scheme_name=row[7] if len(row) > 7 else None,
+            scheme_snapshot=scheme_snapshot
+        ))
+    return result
 
 def save_diff_items(items: List[DiffItem], batch_id: int):
     conn = get_connection()

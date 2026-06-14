@@ -37,7 +37,8 @@ def setup_test_db():
             updated_at TEXT NOT NULL,
             locked_by TEXT,
             lock_time TEXT,
-            scheme_name TEXT
+            scheme_name TEXT,
+            scheme_snapshot TEXT
         )
     ''')
     
@@ -785,6 +786,466 @@ class TestToleranceNotAffected:
         )
         assert qty_tolerated == False
         assert amt_tolerated == False
+
+
+class TestRuleSchemeSnapshot:
+    def test_scheme_snapshot_creation(self):
+        from purchase_reconciliation.models import RuleScheme
+        
+        scheme = RuleScheme(
+            name='snapshot_test',
+            business_line='测试业务线',
+            description='快照测试',
+            quantity_tolerance=1.5,
+            amount_tolerance=100.0,
+            date_offset_days=3,
+            required_fields=['bill_no', 'item_code'],
+            ignored_fields=['supplier_name']
+        )
+        
+        snapshot = scheme.to_snapshot()
+        
+        assert snapshot['name'] == 'snapshot_test'
+        assert snapshot['business_line'] == '测试业务线'
+        assert snapshot['description'] == '快照测试'
+        assert snapshot['quantity_tolerance'] == 1.5
+        assert snapshot['amount_tolerance'] == 100.0
+        assert snapshot['date_offset_days'] == 3
+        assert snapshot['required_fields'] == ['bill_no', 'item_code']
+        assert snapshot['ignored_fields'] == ['supplier_name']
+    
+    def test_scheme_snapshot_summary(self):
+        from purchase_reconciliation.models import RuleScheme
+        
+        scheme = RuleScheme(
+            name='summary_test',
+            quantity_tolerance=1.0,
+            amount_tolerance=50.0,
+            date_offset_days=3,
+            required_fields=['item_code'],
+            ignored_fields=['supplier_name']
+        )
+        
+        summary = scheme.get_snapshot_summary()
+        
+        assert '数量容差±1.0' in summary
+        assert '金额容差±50.0' in summary
+        assert '日期偏移3天' in summary
+        assert '必填:item_code' in summary
+        assert '忽略:supplier_name' in summary
+    
+    def test_batch_scheme_snapshot_persistence(self):
+        from purchase_reconciliation.models import RuleScheme, Batch
+        
+        scheme = RuleScheme(
+            name='batch_snapshot_test',
+            quantity_tolerance=2.0,
+            amount_tolerance=200.0,
+            date_offset_days=5
+        )
+        
+        batch = Batch(
+            batch_no='TEST_001',
+            scheme_name='batch_snapshot_test',
+            scheme_snapshot=scheme.to_snapshot()
+        )
+        
+        assert batch.scheme_snapshot is not None
+        assert batch.scheme_snapshot['quantity_tolerance'] == 2.0
+        assert batch.scheme_snapshot['amount_tolerance'] == 200.0
+        
+        summary = batch.get_scheme_snapshot_summary()
+        assert '方案:batch_snapshot_test' in summary
+        assert '数量容差±2.0' in summary
+
+
+class TestCrossRestartPersistence:
+    def test_scheme_persistence_after_db_reload(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, delete_rule_scheme
+        import purchase_reconciliation.storage as storage_module
+        
+        original_db_path = storage_module.DB_PATH
+        temp_db_path = os.path.join(tempfile.gettempdir(), 'test_persistence_scheme.db')
+        storage_module.DB_PATH = temp_db_path
+        
+        try:
+            scheme = RuleScheme(
+                name='persist_test',
+                business_line='华东区',
+                description='持久化测试',
+                quantity_tolerance=3.0,
+                amount_tolerance=150.0,
+                date_offset_days=7,
+                required_fields=['bill_no'],
+                ignored_fields=['unit_price']
+            )
+            
+            save_rule_scheme(scheme)
+            
+            if hasattr(storage_module, '_connection_cache'):
+                del storage_module._connection_cache
+            
+            retrieved = get_rule_scheme('persist_test')
+            
+            assert retrieved is not None
+            assert retrieved.name == 'persist_test'
+            assert retrieved.business_line == '华东区'
+            assert retrieved.description == '持久化测试'
+            assert retrieved.quantity_tolerance == 3.0
+            assert retrieved.amount_tolerance == 150.0
+            assert retrieved.date_offset_days == 7
+            assert retrieved.required_fields == ['bill_no']
+            assert retrieved.ignored_fields == ['unit_price']
+            
+            delete_rule_scheme('persist_test')
+        finally:
+            storage_module.DB_PATH = original_db_path
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)
+    
+    def test_batch_scheme_snapshot_persistence_after_reload(self):
+        from purchase_reconciliation.models import RuleScheme, Batch, BatchStatus
+        from purchase_reconciliation.storage import save_batch, get_batch_by_no, delete_rule_scheme
+        import purchase_reconciliation.storage as storage_module
+        
+        original_db_path = storage_module.DB_PATH
+        temp_db_path = os.path.join(tempfile.gettempdir(), 'test_persistence_batch.db')
+        storage_module.DB_PATH = temp_db_path
+        
+        try:
+            scheme = RuleScheme(
+                name='batch_persist_test',
+                quantity_tolerance=4.0,
+                amount_tolerance=200.0,
+                date_offset_days=10
+            )
+            
+            batch = Batch(
+                batch_no='PERSIST_BATCH_001',
+                status=BatchStatus.OPEN,
+                scheme_name='batch_persist_test',
+                scheme_snapshot=scheme.to_snapshot()
+            )
+            
+            save_batch(batch)
+            
+            if hasattr(storage_module, '_connection_cache'):
+                del storage_module._connection_cache
+            
+            retrieved = get_batch_by_no('PERSIST_BATCH_001')
+            
+            assert retrieved is not None
+            assert retrieved.batch_no == 'PERSIST_BATCH_001'
+            assert retrieved.scheme_snapshot is not None
+            assert retrieved.scheme_snapshot['name'] == 'batch_persist_test'
+            assert retrieved.scheme_snapshot['quantity_tolerance'] == 4.0
+            assert retrieved.scheme_snapshot['amount_tolerance'] == 200.0
+            assert retrieved.scheme_snapshot['date_offset_days'] == 10
+        finally:
+            storage_module.DB_PATH = original_db_path
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)
+
+
+class TestImportExportConflictHandling:
+    def test_import_with_conflict_skip_preserves_original(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, import_rule_schemes, delete_rule_scheme
+        
+        original = RuleScheme(
+            name='conflict_skip_test',
+            quantity_tolerance=1.0,
+            amount_tolerance=50.0,
+            date_offset_days=3
+        )
+        save_rule_scheme(original)
+        
+        import_data = [{
+            'name': 'conflict_skip_test',
+            'quantity_tolerance': 99.0,
+            'amount_tolerance': 999.0,
+            'date_offset_days': 30
+        }]
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(import_data, 'skip')
+        
+        assert skipped == 1
+        assert imported == 0
+        
+        retrieved = get_rule_scheme('conflict_skip_test')
+        assert retrieved.quantity_tolerance == 1.0
+        assert retrieved.amount_tolerance == 50.0
+        assert retrieved.date_offset_days == 3
+        
+        delete_rule_scheme('conflict_skip_test')
+    
+    def test_import_with_conflict_overwrite_updates_all_fields(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, import_rule_schemes, delete_rule_scheme
+        
+        original = RuleScheme(
+            name='conflict_overwrite_test',
+            business_line='原业务线',
+            description='原描述',
+            quantity_tolerance=1.0,
+            amount_tolerance=50.0,
+            date_offset_days=3,
+            required_fields=['field1'],
+            ignored_fields=['field2']
+        )
+        save_rule_scheme(original)
+        
+        import_data = [{
+            'name': 'conflict_overwrite_test',
+            'business_line': '新业务线',
+            'description': '新描述',
+            'quantity_tolerance': 5.0,
+            'amount_tolerance': 500.0,
+            'date_offset_days': 10,
+            'required_fields': ['fieldA', 'fieldB'],
+            'ignored_fields': ['fieldC']
+        }]
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(import_data, 'overwrite')
+        
+        assert overwritten == 1
+        
+        retrieved = get_rule_scheme('conflict_overwrite_test')
+        assert retrieved.business_line == '新业务线'
+        assert retrieved.description == '新描述'
+        assert retrieved.quantity_tolerance == 5.0
+        assert retrieved.amount_tolerance == 500.0
+        assert retrieved.date_offset_days == 10
+        assert retrieved.required_fields == ['fieldA', 'fieldB']
+        assert retrieved.ignored_fields == ['fieldC']
+        
+        delete_rule_scheme('conflict_overwrite_test')
+    
+    def test_import_with_conflict_rename_creates_new_scheme(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, import_rule_schemes, get_all_rule_schemes, delete_rule_scheme
+        
+        original = RuleScheme(
+            name='conflict_rename_test',
+            quantity_tolerance=1.0
+        )
+        save_rule_scheme(original)
+        
+        import_data = [{
+            'name': 'conflict_rename_test',
+            'quantity_tolerance': 10.0,
+            'amount_tolerance': 100.0
+        }]
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(import_data, 'rename')
+        
+        assert renamed == 1
+        assert imported == 0
+        
+        original_retrieved = get_rule_scheme('conflict_rename_test')
+        assert original_retrieved.quantity_tolerance == 1.0
+        
+        renamed_retrieved = get_rule_scheme('conflict_rename_test_imported_1')
+        assert renamed_retrieved is not None
+        assert renamed_retrieved.quantity_tolerance == 10.0
+        
+        delete_rule_scheme('conflict_rename_test')
+        delete_rule_scheme('conflict_rename_test_imported_1')
+    
+    def test_import_multiple_conflicts_with_skip_action(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, get_rule_scheme, import_rule_schemes, delete_rule_scheme
+        
+        scheme1 = RuleScheme(name='multi_skip_a', quantity_tolerance=1.0)
+        scheme2 = RuleScheme(name='multi_skip_b', quantity_tolerance=2.0)
+        save_rule_scheme(scheme1)
+        save_rule_scheme(scheme2)
+        
+        import_data = [
+            {'name': 'multi_skip_a', 'quantity_tolerance': 99.0},
+            {'name': 'multi_skip_b', 'quantity_tolerance': 88.0},
+            {'name': 'multi_new', 'quantity_tolerance': 77.0}
+        ]
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(import_data, 'skip')
+        
+        assert skipped == 2
+        assert overwritten == 0
+        assert renamed == 0
+        assert imported == 1
+        
+        assert get_rule_scheme('multi_skip_a').quantity_tolerance == 1.0
+        assert get_rule_scheme('multi_skip_b').quantity_tolerance == 2.0
+        assert get_rule_scheme('multi_new').quantity_tolerance == 77.0
+        
+        delete_rule_scheme('multi_skip_a')
+        delete_rule_scheme('multi_skip_b')
+        delete_rule_scheme('multi_new')
+
+
+class TestSchemeSnapshotTraceability:
+    def test_batch_creation_includes_scheme_snapshot(self):
+        from purchase_reconciliation.models import RuleScheme, Batch
+        from purchase_reconciliation.storage import save_batch, get_batch_by_no, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='traceability_test',
+            business_line='追溯测试',
+            quantity_tolerance=5.0,
+            amount_tolerance=250.0,
+            date_offset_days=7,
+            required_fields=['bill_no', 'item_code'],
+            ignored_fields=['supplier_name']
+        )
+        
+        batch = Batch(
+            batch_no='TRACE_BATCH_001',
+            scheme_name='traceability_test',
+            scheme_snapshot=scheme.to_snapshot()
+        )
+        
+        save_batch(batch)
+        
+        retrieved = get_batch_by_no('TRACE_BATCH_001')
+        
+        assert retrieved.scheme_snapshot is not None
+        assert retrieved.scheme_snapshot['name'] == 'traceability_test'
+        assert retrieved.scheme_snapshot['business_line'] == '追溯测试'
+        assert retrieved.scheme_snapshot['quantity_tolerance'] == 5.0
+        assert retrieved.scheme_snapshot['amount_tolerance'] == 250.0
+        assert retrieved.scheme_snapshot['date_offset_days'] == 7
+        assert retrieved.scheme_snapshot['required_fields'] == ['bill_no', 'item_code']
+        assert retrieved.scheme_snapshot['ignored_fields'] == ['supplier_name']
+        
+        delete_rule_scheme('traceability_test')
+    
+    def test_scheme_snapshot_in_audit_note(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, import_rule_schemes, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='audit_note_test',
+            quantity_tolerance=3.0,
+            amount_tolerance=150.0
+        )
+        save_rule_scheme(scheme)
+        
+        import_data = [{
+            'name': 'audit_note_test',
+            'quantity_tolerance': 6.0,
+            'amount_tolerance': 300.0
+        }]
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(import_data, 'overwrite')
+        
+        note = f"覆盖方案 '{import_data[0]['name']}'"
+        if overwritten > 0:
+            note += f" (数量容差: {import_data[0]['quantity_tolerance']}, 金额容差: {import_data[0]['amount_tolerance']})"
+        
+        assert '数量容差: 6.0' in note
+        assert '金额容差: 300.0' in note
+        
+        delete_rule_scheme('audit_note_test')
+    
+    def test_batch_list_shows_scheme_snapshot_summary(self):
+        from purchase_reconciliation.models import RuleScheme, Batch
+        from purchase_reconciliation.storage import save_batch, get_all_batches, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='list_snapshot_test',
+            quantity_tolerance=4.0,
+            amount_tolerance=200.0,
+            date_offset_days=5,
+            required_fields=['item_code']
+        )
+        
+        batch = Batch(
+            batch_no='LIST_SNAP_001',
+            scheme_name='list_snapshot_test',
+            scheme_snapshot=scheme.to_snapshot()
+        )
+        
+        save_batch(batch)
+        
+        batches = get_all_batches()
+        list_batch = next((b for b in batches if b.batch_no == 'LIST_SNAP_001'), None)
+        
+        assert list_batch is not None
+        summary = list_batch.get_scheme_snapshot_summary()
+        assert '方案:list_snapshot_test' in summary
+        assert '数量容差±4.0' in summary
+        assert '金额容差±200.0' in summary
+        
+        delete_rule_scheme('list_snapshot_test')
+
+
+class TestExportFileIntegrity:
+    def test_export_file_contains_all_scheme_fields(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, export_all_rule_schemes, delete_rule_scheme
+        
+        scheme = RuleScheme(
+            name='export_integrity_test',
+            business_line='完整性测试',
+            description='导出完整性测试',
+            quantity_tolerance=2.5,
+            amount_tolerance=125.0,
+            date_offset_days=-3,
+            required_fields=['field1', 'field2', 'field3'],
+            ignored_fields=['fieldA', 'fieldB']
+        )
+        save_rule_scheme(scheme)
+        
+        exported = export_all_rule_schemes()
+        export_entry = next((e for e in exported if e['name'] == 'export_integrity_test'), None)
+        
+        assert export_entry is not None
+        assert export_entry['business_line'] == '完整性测试'
+        assert export_entry['description'] == '导出完整性测试'
+        assert export_entry['quantity_tolerance'] == 2.5
+        assert export_entry['amount_tolerance'] == 125.0
+        assert export_entry['date_offset_days'] == -3
+        assert export_entry['required_fields'] == ['field1', 'field2', 'field3']
+        assert export_entry['ignored_fields'] == ['fieldA', 'fieldB']
+        
+        delete_rule_scheme('export_integrity_test')
+    
+    def test_roundtrip_export_import_preserves_all_fields(self):
+        from purchase_reconciliation.models import RuleScheme
+        from purchase_reconciliation.storage import save_rule_scheme, export_all_rule_schemes, import_rule_schemes, get_rule_scheme, delete_rule_scheme
+        
+        original = RuleScheme(
+            name='roundtrip_test',
+            business_line='往返测试',
+            description='测试往返导出导入',
+            quantity_tolerance=3.5,
+            amount_tolerance=175.0,
+            date_offset_days=4,
+            required_fields=['a', 'b', 'c'],
+            ignored_fields=['x', 'y']
+        )
+        save_rule_scheme(original)
+        
+        exported = export_all_rule_schemes()
+        exported_data = [e for e in exported if e['name'] == 'roundtrip_test']
+        
+        delete_rule_scheme('roundtrip_test')
+        
+        imported, skipped, overwritten, renamed = import_rule_schemes(exported_data, 'skip')
+        
+        restored = get_rule_scheme('roundtrip_test')
+        
+        assert restored is not None
+        assert restored.business_line == '往返测试'
+        assert restored.description == '测试往返导出导入'
+        assert restored.quantity_tolerance == 3.5
+        assert restored.amount_tolerance == 175.0
+        assert restored.date_offset_days == 4
+        assert restored.required_fields == ['a', 'b', 'c']
+        assert restored.ignored_fields == ['x', 'y']
+        
+        delete_rule_scheme('roundtrip_test')
 
 
 if __name__ == '__main__':
