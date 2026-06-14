@@ -1,0 +1,4 @@
+bill_no,item_code,item_name,quantity,unit_price,bill_date,supplier_code,supplier_name
+BILL-001,P001,笔记本电脑,10,5000.00,2024-01-15,S001,华为科技有限公司
+BILL-001,P002,显示器,abc,1500.00,2024-01-15,S001,华为科技有限公司
+BILL-001,P003,键盘,20,100.00,2024-01-15,S001,华为科技有限公司

@@ -1,0 +1,2 @@
+[console_scripts]
+purchase-recon = purchase_reconciliation.cli:cli
