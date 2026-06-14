@@ -45,6 +45,7 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',
             appeal_note TEXT DEFAULT '',
             operator TEXT DEFAULT '',
+            operator_role TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (batch_id) REFERENCES batches(id)
@@ -58,6 +59,7 @@ def init_db():
             batch_no TEXT NOT NULL,
             operation TEXT NOT NULL,
             operator TEXT NOT NULL,
+            operator_role TEXT DEFAULT '',
             target_item_id INTEGER,
             note TEXT DEFAULT '',
             created_at TEXT NOT NULL,
@@ -75,6 +77,16 @@ def init_db():
             updated_at TEXT NOT NULL
         )
     ''')
+    
+    cursor.execute("PRAGMA table_info(diff_items)")
+    diff_cols = [col[1] for col in cursor.fetchall()]
+    if 'operator_role' not in diff_cols:
+        cursor.execute("ALTER TABLE diff_items ADD COLUMN operator_role TEXT DEFAULT ''")
+    
+    cursor.execute("PRAGMA table_info(audit_logs)")
+    audit_cols = [col[1] for col in cursor.fetchall()]
+    if 'operator_role' not in audit_cols:
+        cursor.execute("ALTER TABLE audit_logs ADD COLUMN operator_role TEXT DEFAULT ''")
     
     conn.commit()
     conn.close()
@@ -119,8 +131,8 @@ def get_batch_by_no(batch_no: str) -> Optional[Batch]:
     
     if row:
         return Batch(
-            id=row[0],
             batch_no=row[1],
+            id=row[0],
             status=BatchStatus(row[2]),
             created_at=datetime.fromisoformat(row[3]),
             updated_at=datetime.fromisoformat(row[4]),
@@ -143,8 +155,8 @@ def get_all_batches() -> List[Batch]:
     
     return [
         Batch(
-            id=row[0],
             batch_no=row[1],
+            id=row[0],
             status=BatchStatus(row[2]),
             created_at=datetime.fromisoformat(row[3]),
             updated_at=datetime.fromisoformat(row[4]),
@@ -164,15 +176,15 @@ def save_diff_items(items: List[DiffItem], batch_id: int):
                 batch_id, bill_no, receive_no, item_code, item_name,
                 bill_quantity, receive_quantity, quantity_diff,
                 bill_amount, receive_amount, amount_diff,
-                supplier_code, supplier_name, status, appeal_note, operator,
+                supplier_code, supplier_name, status, appeal_note, operator, operator_role,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             batch_id, item.bill_no, item.receive_no, item.item_code, item.item_name,
             item.bill_quantity, item.receive_quantity, item.quantity_diff,
             item.bill_amount, item.receive_amount, item.amount_diff,
             item.supplier_code, item.supplier_name, item.status.value,
-            item.appeal_note, item.operator, now, now
+            item.appeal_note, item.operator, item.operator_role, now, now
         ))
         item.id = cursor.lastrowid
     
@@ -187,7 +199,7 @@ def get_diff_items_by_batch(batch_id: int) -> List[DiffItem]:
         SELECT id, batch_id, bill_no, receive_no, item_code, item_name,
                bill_quantity, receive_quantity, quantity_diff,
                bill_amount, receive_amount, amount_diff,
-               supplier_code, supplier_name, status, appeal_note, operator,
+               supplier_code, supplier_name, status, appeal_note, operator, operator_role,
                created_at, updated_at
         FROM diff_items WHERE batch_id = ? ORDER BY item_code
     ''', (batch_id,))
@@ -197,8 +209,6 @@ def get_diff_items_by_batch(batch_id: int) -> List[DiffItem]:
     
     return [
         DiffItem(
-            id=row[0],
-            batch_id=row[1],
             bill_no=row[2],
             receive_no=row[3],
             item_code=row[4],
@@ -211,23 +221,27 @@ def get_diff_items_by_batch(batch_id: int) -> List[DiffItem]:
             amount_diff=row[11],
             supplier_code=row[12],
             supplier_name=row[13],
+            id=row[0],
+            batch_id=row[1],
             status=AppealStatus(row[14]),
             appeal_note=row[15],
             operator=row[16],
-            created_at=datetime.fromisoformat(row[17]),
-            updated_at=datetime.fromisoformat(row[18])
+            operator_role=row[17] if len(row) > 17 else "",
+            created_at=datetime.fromisoformat(row[18]) if len(row) > 18 else None,
+            updated_at=datetime.fromisoformat(row[19]) if len(row) > 19 else None
         ) for row in rows
     ]
 
-def update_diff_item_status(item_id: int, status: AppealStatus, operator: str, note: str = ""):
+def update_diff_item_status(item_id: int, status: AppealStatus, operator: str, 
+                            operator_role: str = "", note: str = ""):
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
     
     cursor.execute('''
-        UPDATE diff_items SET status=?, operator=?, appeal_note=?, updated_at=?
+        UPDATE diff_items SET status=?, operator=?, operator_role=?, appeal_note=?, updated_at=?
         WHERE id=?
-    ''', (status.value, operator, note, now, item_id))
+    ''', (status.value, operator, operator_role, note, now, item_id))
     
     conn.commit()
     conn.close()
@@ -240,7 +254,7 @@ def get_diff_item(item_id: int) -> Optional[DiffItem]:
         SELECT id, batch_id, bill_no, receive_no, item_code, item_name,
                bill_quantity, receive_quantity, quantity_diff,
                bill_amount, receive_amount, amount_diff,
-               supplier_code, supplier_name, status, appeal_note, operator,
+               supplier_code, supplier_name, status, appeal_note, operator, operator_role,
                created_at, updated_at
         FROM diff_items WHERE id = ?
     ''', (item_id,))
@@ -250,8 +264,6 @@ def get_diff_item(item_id: int) -> Optional[DiffItem]:
     
     if row:
         return DiffItem(
-            id=row[0],
-            batch_id=row[1],
             bill_no=row[2],
             receive_no=row[3],
             item_code=row[4],
@@ -264,25 +276,29 @@ def get_diff_item(item_id: int) -> Optional[DiffItem]:
             amount_diff=row[11],
             supplier_code=row[12],
             supplier_name=row[13],
+            id=row[0],
+            batch_id=row[1],
             status=AppealStatus(row[14]),
             appeal_note=row[15],
             operator=row[16],
-            created_at=datetime.fromisoformat(row[17]),
-            updated_at=datetime.fromisoformat(row[18])
+            operator_role=row[17] if len(row) > 17 else "",
+            created_at=datetime.fromisoformat(row[18]) if len(row) > 18 else None,
+            updated_at=datetime.fromisoformat(row[19]) if len(row) > 19 else None
         )
     return None
 
 def add_audit_log(batch_id: int, batch_no: str, operation: str, 
-                  operator: str, target_item_id: Optional[int] = None, note: str = ""):
+                  operator: str, operator_role: str = "",
+                  target_item_id: Optional[int] = None, note: str = ""):
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
     
     cursor.execute('''
         INSERT INTO audit_logs (
-            batch_id, batch_no, operation, operator, target_item_id, note, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (batch_id, batch_no, operation, operator, target_item_id, note, now))
+            batch_id, batch_no, operation, operator, operator_role, target_item_id, note, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (batch_id, batch_no, operation, operator, operator_role, target_item_id, note, now))
     
     conn.commit()
     conn.close()
@@ -293,12 +309,12 @@ def get_audit_logs(batch_id: Optional[int] = None) -> List[AuditLog]:
     
     if batch_id:
         cursor.execute('''
-            SELECT id, batch_id, batch_no, operation, operator, target_item_id, note, created_at
+            SELECT id, batch_id, batch_no, operation, operator, operator_role, target_item_id, note, created_at
             FROM audit_logs WHERE batch_id = ? ORDER BY created_at DESC
         ''', (batch_id,))
     else:
         cursor.execute('''
-            SELECT id, batch_id, batch_no, operation, operator, target_item_id, note, created_at
+            SELECT id, batch_id, batch_no, operation, operator, operator_role, target_item_id, note, created_at
             FROM audit_logs ORDER BY created_at DESC
         ''')
     
@@ -307,14 +323,15 @@ def get_audit_logs(batch_id: Optional[int] = None) -> List[AuditLog]:
     
     return [
         AuditLog(
-            id=row[0],
             batch_id=row[1],
             batch_no=row[2],
             operation=row[3],
             operator=row[4],
-            target_item_id=row[5],
-            note=row[6],
-            created_at=datetime.fromisoformat(row[7])
+            id=row[0],
+            operator_role=row[5] if len(row) > 5 else "",
+            target_item_id=row[6] if len(row) > 6 else None,
+            note=row[7] if len(row) > 7 else "",
+            created_at=datetime.fromisoformat(row[8]) if len(row) > 8 else None
         ) for row in rows
     ]
 
@@ -350,3 +367,31 @@ def get_all_configs() -> Dict[str, Any]:
     conn.close()
     
     return {row[0]: {"value": row[1], "description": row[2]} for row in rows}
+
+def is_batch_rollback_conflict(batch_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT COUNT(*) FROM diff_items 
+        WHERE batch_id = ? AND status = ?
+    ''', (batch_id, AppealStatus.ROLLED_BACK.value))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    return row[0] > 0 if row else False
+
+def has_pending_items(batch_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT COUNT(*) FROM diff_items 
+        WHERE batch_id = ? AND status = ?
+    ''', (batch_id, AppealStatus.PENDING.value))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    return row[0] > 0 if row else False

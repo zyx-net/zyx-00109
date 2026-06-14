@@ -1,7 +1,10 @@
 import click
 from tabulate import tabulate
 
-from ..utils import read_supplier_bill, read_receiving_list
+from ..utils import (
+    read_supplier_bill, read_receiving_list, validate_supplier_bill_full,
+    validate_receiving_list_full
+)
 from ..storage import get_config
 from ..models import DiffItem
 
@@ -23,6 +26,26 @@ def check_diff(bill_file, receiving_file, dry_run):
     
     if not receiving_path:
         click.echo("错误: 请提供收货清单文件或先使用 import receiving 命令导入")
+        return
+    
+    bill_validation = validate_supplier_bill_full(bill_path)
+    receive_validation = validate_receiving_list_full(receiving_path)
+    
+    all_errors = []
+    all_errors.extend(bill_validation.errors)
+    all_errors.extend(receive_validation.errors)
+    
+    if all_errors:
+        click.echo(f"\n[DRY-RUN] 验证失败，发现 {len(all_errors)} 个错误:")
+        click.echo("-" * 60)
+        
+        for err in all_errors:
+            click.echo(f"  行 {err.row}: [{err.error_type}] {err.field}")
+            click.echo(f"    值: '{err.value}'")
+            click.echo(f"    原因: {err.message}")
+        
+        click.echo("-" * 60)
+        click.echo("验证未通过，数据不会落库")
         return
     
     try:

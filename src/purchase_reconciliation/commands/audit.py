@@ -32,12 +32,13 @@ def list_audit(batch_no):
             log.batch_no,
             log.operation,
             log.operator,
+            log.operator_role,
             log.target_item_id or '',
             log.note[:50] + '...' if len(log.note) > 50 else log.note,
-            log.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else ''
         ])
     
-    headers = ['日志ID', '批次编号', '操作类型', '操作人', '目标项ID', '备注', '操作时间']
+    headers = ['日志ID', '批次编号', '操作类型', '操作人', '角色', '目标项ID', '备注', '操作时间']
     click.echo(tabulate(table_data, headers=headers))
 
 @audit_command.command(name='summary')
@@ -50,10 +51,13 @@ def audit_summary():
     
     operation_counts = {}
     operator_counts = {}
+    role_counts = {}
     
     for log in logs:
         operation_counts[log.operation] = operation_counts.get(log.operation, 0) + 1
         operator_counts[log.operator] = operator_counts.get(log.operator, 0) + 1
+        if log.operator_role:
+            role_counts[log.operator_role] = role_counts.get(log.operator_role, 0) + 1
     
     click.echo("审计日志汇总:")
     click.echo(f"  总操作数: {len(logs)}")
@@ -64,3 +68,8 @@ def audit_summary():
     click.echo("\n  操作人分布:")
     for operator, count in sorted(operator_counts.items()):
         click.echo(f"    {operator}: {count}")
+    
+    if role_counts:
+        click.echo("\n  角色分布:")
+        for role, count in sorted(role_counts.items()):
+            click.echo(f"    {role}: {count}")

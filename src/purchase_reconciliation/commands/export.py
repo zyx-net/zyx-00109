@@ -4,6 +4,7 @@ import csv
 
 from ..storage import get_batch_by_no, get_diff_items_by_batch, get_all_batches, get_audit_logs
 from ..models import AppealStatus
+from ..utils import validate_path_conflict
 
 @click.group(name='export')
 def export_command():
@@ -13,14 +14,15 @@ def export_command():
 @click.option('--batch-no', '-b', required=True, help='批次编号')
 @click.option('--output', '-o', required=True, type=click.Path(), help='输出文件路径')
 def export_result(batch_no, output):
+    can_write, error_msg = validate_path_conflict(output)
+    if not can_write:
+        click.echo(f"错误: {error_msg}")
+        return
+    
     batch = get_batch_by_no(batch_no)
     
     if not batch:
         click.echo(f"错误: 批次 {batch_no} 不存在")
-        return
-    
-    if os.path.exists(output):
-        click.echo(f"错误: 输出文件 {output} 已存在")
         return
     
     items = get_diff_items_by_batch(batch.id)
@@ -30,7 +32,7 @@ def export_result(batch_no, output):
         writer.writerow([
             '差异项ID', '账单编号', '收货编号', '物料编码', '物料名称',
             '供应商编码', '供应商名称', '账单数量', '收货数量', '数量差异',
-            '账单金额', '收货金额', '金额差异', '申诉状态', '操作人', '备注', '更新时间'
+            '账单金额', '收货金额', '金额差异', '申诉状态', '操作人', '角色', '备注', '更新时间'
         ])
         
         for item in items:
@@ -50,8 +52,9 @@ def export_result(batch_no, output):
                 item.amount_diff,
                 item.status.value,
                 item.operator,
+                item.operator_role,
                 item.appeal_note,
-                item.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+                item.updated_at.strftime('%Y-%m-%d %H:%M:%S') if item.updated_at else ''
             ])
     
     click.echo(f"成功导出结果到: {output}")
@@ -59,8 +62,9 @@ def export_result(batch_no, output):
 @export_command.command(name='summary')
 @click.option('--output', '-o', required=True, type=click.Path(), help='输出文件路径')
 def export_summary(output):
-    if os.path.exists(output):
-        click.echo(f"错误: 输出文件 {output} 已存在")
+    can_write, error_msg = validate_path_conflict(output)
+    if not can_write:
+        click.echo(f"错误: {error_msg}")
         return
     
     batches = get_all_batches()
@@ -87,7 +91,7 @@ def export_summary(output):
                 approved,
                 rejected,
                 rolled_back,
-                batch.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else '',
                 batch.locked_by or '',
                 batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else ''
             ])
@@ -98,8 +102,9 @@ def export_summary(output):
 @click.option('--batch-no', '-b', help='批次编号（不指定则导出所有）')
 @click.option('--output', '-o', required=True, type=click.Path(), help='输出文件路径')
 def export_audit(batch_no, output):
-    if os.path.exists(output):
-        click.echo(f"错误: 输出文件 {output} 已存在")
+    can_write, error_msg = validate_path_conflict(output)
+    if not can_write:
+        click.echo(f"错误: {error_msg}")
         return
     
     batch = None
@@ -117,7 +122,7 @@ def export_audit(batch_no, output):
     with open(output, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
-            '日志ID', '批次编号', '操作类型', '操作人', '目标项ID', '备注', '操作时间'
+            '日志ID', '批次编号', '操作类型', '操作人', '角色', '目标项ID', '备注', '操作时间'
         ])
         
         for log in logs:
@@ -126,9 +131,10 @@ def export_audit(batch_no, output):
                 log.batch_no,
                 log.operation,
                 log.operator,
+                log.operator_role,
                 log.target_item_id or '',
                 log.note,
-                log.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else ''
             ])
     
     click.echo(f"成功导出审计日志到: {output}")

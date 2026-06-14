@@ -1,7 +1,10 @@
 import click
 import os
 
-from ..utils import read_supplier_bill, read_receiving_list, validate_csv_structure
+from ..utils import (
+    read_supplier_bill, read_receiving_list, validate_csv_structure,
+    validate_supplier_bill_full, validate_receiving_list_full
+)
 from ..storage import save_config, get_config
 
 BILL_REQUIRED_FIELDS = [
@@ -22,27 +25,45 @@ def import_command():
 @import_command.command(name='bill')
 @click.option('--file', '-f', required=True, type=click.Path(exists=True), help='供应商账单CSV文件路径')
 def import_bill(file):
-    if not validate_csv_structure(file, BILL_REQUIRED_FIELDS):
-        click.echo(f"错误: 供应商账单文件格式不正确")
+    validation = validate_supplier_bill_full(file)
+    
+    if validation.has_errors():
+        click.echo(f"错误: 供应商账单文件验证失败:")
+        click.echo("-" * 60)
+        for err in validation.errors:
+            click.echo(f"  行 {err.row}: [{err.error_type}] {err.field}")
+            click.echo(f"    值: '{err.value}'")
+            click.echo(f"    原因: {err.message}")
+        click.echo("-" * 60)
         return
     
     try:
         items = read_supplier_bill(file)
         save_config('last_bill_file', file, '上次导入的供应商账单文件路径')
         click.echo(f"成功导入供应商账单: {len(items)} 条记录")
+        click.echo(f"文件路径已保存: {file}")
     except Exception as e:
         click.echo(f"错误: 导入供应商账单失败 - {str(e)}")
 
 @import_command.command(name='receiving')
 @click.option('--file', '-f', required=True, type=click.Path(exists=True), help='内部收货清单CSV文件路径')
 def import_receiving(file):
-    if not validate_csv_structure(file, RECEIVE_REQUIRED_FIELDS):
-        click.echo(f"错误: 收货清单文件格式不正确")
+    validation = validate_receiving_list_full(file)
+    
+    if validation.has_errors():
+        click.echo(f"错误: 收货清单文件验证失败:")
+        click.echo("-" * 60)
+        for err in validation.errors:
+            click.echo(f"  行 {err.row}: [{err.error_type}] {err.field}")
+            click.echo(f"    值: '{err.value}'")
+            click.echo(f"    原因: {err.message}")
+        click.echo("-" * 60)
         return
     
     try:
         items = read_receiving_list(file)
         save_config('last_receiving_file', file, '上次导入的收货清单文件路径')
         click.echo(f"成功导入收货清单: {len(items)} 条记录")
+        click.echo(f"文件路径已保存: {file}")
     except Exception as e:
         click.echo(f"错误: 导入收货清单失败 - {str(e)}")

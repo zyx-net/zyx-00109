@@ -6,7 +6,7 @@ from ..storage import (
     get_config, save_batch, save_diff_items, get_batch_by_no, get_all_batches,
     get_diff_items_by_batch, add_audit_log, update_diff_item_status
 )
-from ..models import DiffItem, Batch, BatchStatus, AppealStatus
+from ..models import DiffItem, Batch, BatchStatus, AppealStatus, OperatorRole
 from tabulate import tabulate
 
 @click.group(name='batch')
@@ -18,7 +18,13 @@ def batch_command():
 @click.option('--receiving-file', '-r', type=click.Path(exists=True), help='收货清单文件路径')
 @click.option('--dry-run', '-d', is_flag=True, default=False, help='仅检查不入库')
 @click.option('--operator', '-o', required=True, help='操作人')
-def create_batch(bill_file, receiving_file, dry_run, operator):
+@click.option('--role', '-R', required=True, help='操作者角色 (reviewer/approver/admin)')
+def create_batch(bill_file, receiving_file, dry_run, operator, role):
+    if not OperatorRole.is_valid(role):
+        click.echo(f"错误: 无效的角色 '{role}'")
+        click.echo(f"有效角色: {[r.value for r in OperatorRole]}")
+        return
+    
     bill_path = bill_file or get_config('last_bill_file')
     receiving_path = receiving_file or get_config('last_receiving_file')
     
@@ -83,7 +89,8 @@ def create_batch(bill_file, receiving_file, dry_run, operator):
                 amount_diff=bill_amt - receive_amt,
                 supplier_code=supplier_code,
                 supplier_name=supplier_name,
-                operator=operator
+                operator=operator,
+                operator_role=role
             ))
     
     if not diff_items:
@@ -112,13 +119,16 @@ def create_batch(bill_file, receiving_file, dry_run, operator):
     batch = Batch(batch_no=batch_no, status=BatchStatus.OPEN)
     batch_id = save_batch(batch)
     
+    for item in diff_items:
+        item.batch_id = batch_id
     save_diff_items(diff_items, batch_id)
     
-    add_audit_log(batch_id, batch_no, 'CREATE_BATCH', operator, note=f'创建批次，包含 {len(diff_items)} 条差异')
+    add_audit_log(batch_id, batch_no, 'CREATE_BATCH', operator, role, note=f'创建批次，包含 {len(diff_items)} 条差异')
     
     click.echo(f"成功创建批次: {batch_no}")
     click.echo(f"批次ID: {batch_id}")
     click.echo(f"差异记录数: {len(diff_items)}")
+    click.echo(f"操作人: {operator} | 角色: {role}")
 
 @batch_command.command(name='list')
 def list_batches():
@@ -133,7 +143,7 @@ def list_batches():
         table_data.append([
             batch.batch_no,
             batch.status.value,
-            batch.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else '',
             batch.locked_by or '',
             batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else ''
         ])
@@ -203,7 +213,7 @@ def show_batch(batch_no):
     click.echo(f"\n批次信息:")
     click.echo(f"  批次编号: {batch.batch_no}")
     click.echo(f"  状态: {batch.status.value}")
-    click.echo(f"  创建时间: {batch.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    click.echo(f"  创建时间: {batch.created_at.strftime('%Y-%m-%d %H:%M:%S') if batch.created_at else ''}")
     click.echo(f"  锁定人: {batch.locked_by or '无'}")
     click.echo(f"  锁定时间: {batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else '无'}")
     
@@ -225,9 +235,10 @@ def show_batch(batch_no):
             item.amount_diff,
             item.status.value,
             item.appeal_note[:30] + '...' if len(item.appeal_note) > 30 else item.appeal_note,
-            item.operator
+            item.operator,
+            item.operator_role
         ])
     
-    headers = ['ID', '物料编码', '物料名称', '账单数量', '收货数量', '数量差异', '金额差异', '状态', '备注', '操作人']
+    headers = ['ID', '物料编码', '物料名称', '账单数量', '收货数量', '数量差异', '金额差异', '状态', '备注', '操作人', '角色']
     click.echo(f"\n差异记录 ({len(items)} 条):")
     click.echo(tabulate(table_data, headers=headers, floatfmt='.2f'))
