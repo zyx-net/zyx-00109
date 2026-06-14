@@ -158,7 +158,7 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_
         
         has_diff = abs(quantity_diff) > 0 or abs(amount_diff) > 0
         
-        if date_offset != 0 and bill_list and receive_list and not date_in_offset:
+        if bill_list and receive_list and not date_in_offset:
             date_failed_count += 1
             continue
         

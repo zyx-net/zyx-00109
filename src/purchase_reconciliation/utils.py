@@ -149,9 +149,6 @@ def parse_date(date_str: str) -> Optional[datetime]:
     return None
 
 def check_date_offset(bill_date_str: str, receive_date_str: str, offset_days: int) -> Tuple[bool, str]:
-    if offset_days == 0:
-        return True, ""
-    
     bill_date = parse_date(bill_date_str)
     receive_date = parse_date(receive_date_str)
     
@@ -159,6 +156,13 @@ def check_date_offset(bill_date_str: str, receive_date_str: str, offset_days: in
         return False, "日期格式无法解析"
     
     days_diff = abs((bill_date - receive_date).days)
+    
+    if offset_days == 0:
+        if days_diff == 0:
+            return True, "日期严格匹配"
+        else:
+            return False, f"日期差异 {days_diff} 天，严格匹配要求日期完全相同"
+    
     if days_diff <= abs(offset_days):
         return True, f"日期差异 {days_diff} 天在偏移范围内"
     else:

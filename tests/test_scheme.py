@@ -563,6 +563,22 @@ class TestRuleValidationFunctions:
         
         in_offset, reason = check_date_offset('2024-01-15', '2024-01-15', 0)
         assert in_offset == True
+        assert '严格匹配' in reason
+    
+    def test_check_date_offset_zero_rejects_mismatch(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-17', 0)
+        assert in_offset == False
+        assert '严格匹配' in reason
+        assert '2 天' in reason
+    
+    def test_check_date_offset_zero_rejects_one_day_diff(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-16', 0)
+        assert in_offset == False
+        assert '严格匹配' in reason
     
     def test_check_date_offset_within_range(self):
         from purchase_reconciliation.utils import check_date_offset
@@ -679,6 +695,96 @@ class TestRuleSchemeIntegration:
         
         delete_rule_scheme('full_feature_scheme')
         assert get_rule_scheme('full_feature_scheme') is None
+
+
+class TestDateOffsetZeroStrictMatch:
+    def test_date_offset_zero_blocks_date_mismatch(self):
+        import tempfile
+        import os
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-17', 0)
+        assert in_offset == False, "日期偏移为0时应严格匹配，差2天应被拦截"
+        assert '严格匹配' in reason
+    
+    def test_date_offset_zero_allows_same_date(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-15', 0)
+        assert in_offset == True, "日期偏移为0时，相同日期应通过"
+    
+    def test_positive_offset_allows_within_range(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-17', 3)
+        assert in_offset == True, "日期差2天在偏移3天范围内应通过"
+    
+    def test_positive_offset_blocks_beyond_range(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-15', '2024-01-20', 3)
+        assert in_offset == False, "日期差5天超出偏移3天范围应被拦截"
+    
+    def test_negative_offset_works_correctly(self):
+        from purchase_reconciliation.utils import check_date_offset
+        
+        in_offset, reason = check_date_offset('2024-01-20', '2024-01-15', -5)
+        assert in_offset == True, "负偏移-5天，日期差5天应在范围内"
+        
+        in_offset, reason = check_date_offset('2024-01-20', '2024-01-14', -5)
+        assert in_offset == False, "负偏移-5天，日期差6天应超出范围"
+
+
+class TestToleranceNotAffected:
+    def test_quantity_tolerance_still_works(self):
+        from purchase_reconciliation.commands.diff import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(
+            quantity_diff=0.5, amount_diff=10.0,
+            quantity_tolerance=1.0, amount_tolerance=0.0
+        )
+        assert qty_tolerated == True
+        assert amt_tolerated == False
+    
+    def test_amount_tolerance_still_works(self):
+        from purchase_reconciliation.commands.diff import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(
+            quantity_diff=0.5, amount_diff=10.0,
+            quantity_tolerance=0.0, amount_tolerance=20.0
+        )
+        assert qty_tolerated == False
+        assert amt_tolerated == True
+    
+    def test_both_tolerances_work_together(self):
+        from purchase_reconciliation.commands.diff import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(
+            quantity_diff=0.5, amount_diff=10.0,
+            quantity_tolerance=1.0, amount_tolerance=20.0
+        )
+        assert qty_tolerated == True
+        assert amt_tolerated == True
+    
+    def test_tolerance_exactly_at_boundary(self):
+        from purchase_reconciliation.commands.diff import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(
+            quantity_diff=1.0, amount_diff=20.0,
+            quantity_tolerance=1.0, amount_tolerance=20.0
+        )
+        assert qty_tolerated == True
+        assert amt_tolerated == True
+    
+    def test_tolerance_beyond_boundary(self):
+        from purchase_reconciliation.commands.diff import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(
+            quantity_diff=1.1, amount_diff=20.1,
+            quantity_tolerance=1.0, amount_tolerance=20.0
+        )
+        assert qty_tolerated == False
+        assert amt_tolerated == False
 
 
 if __name__ == '__main__':
