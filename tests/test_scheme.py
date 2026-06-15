@@ -1269,7 +1269,7 @@ class TestAtomicImport:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'skip')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(import_data, 'skip')
         
         assert errors == []
         assert imported == 2
@@ -1305,7 +1305,7 @@ class TestAtomicImport:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'skip')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(import_data, 'skip')
         
         assert errors == []
         assert imported == 1
@@ -1334,7 +1334,7 @@ class TestAtomicImport:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'overwrite')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(import_data, 'overwrite')
         
         assert errors == []
         assert overwritten == 1
@@ -1365,7 +1365,7 @@ class TestAtomicImport:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(import_data, 'overwrite')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(import_data, 'overwrite')
         
         assert imported == 1
         assert overwritten == 1

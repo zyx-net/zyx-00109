@@ -338,6 +338,12 @@ def generate_batch_no() -> str:
     now = datetime.now()
     return f"BATCH_{now.strftime('%Y%m%d_%H%M%S')}"
 
+def apply_tolerance(quantity_diff: float, amount_diff: float, 
+                   quantity_tolerance: float, amount_tolerance: float) -> tuple:
+    qty_tolerated = abs(quantity_diff) <= quantity_tolerance if quantity_tolerance > 0 else False
+    amt_tolerated = abs(amount_diff) <= amount_tolerance if amount_tolerance > 0 else False
+    return qty_tolerated, amt_tolerated
+
 def validate_csv_structure(file_path: str, required_fields: List[str]) -> Tuple[bool, List[str]]:
     errors = []
     try:

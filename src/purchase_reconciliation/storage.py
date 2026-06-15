@@ -724,8 +724,46 @@ def export_all_rule_schemes() -> List[Dict[str, Any]]:
     schemes = get_all_rule_schemes()
     return [scheme.to_dict() for scheme in schemes]
 
+def _save_rule_scheme_with_conn(scheme: RuleScheme, conn, cursor) -> int:
+    now = datetime.now().isoformat()
+    
+    if scheme.id is None:
+        cursor.execute('''
+            INSERT INTO rule_schemes (
+                name, business_line, description, quantity_tolerance, amount_tolerance,
+                date_offset_days, required_fields, ignored_fields, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            scheme.name, scheme.business_line, scheme.description,
+            scheme.quantity_tolerance, scheme.amount_tolerance,
+            scheme.date_offset_days,
+            json.dumps(scheme.required_fields),
+            json.dumps(scheme.ignored_fields),
+            1 if scheme.is_active else 0,
+            now, now
+        ))
+        scheme.id = cursor.lastrowid
+    else:
+        cursor.execute('''
+            UPDATE rule_schemes SET 
+                name=?, business_line=?, description=?,
+                quantity_tolerance=?, amount_tolerance=?, date_offset_days=?,
+                required_fields=?, ignored_fields=?, is_active=?, updated_at=?
+            WHERE id=?
+        ''', (
+            scheme.name, scheme.business_line, scheme.description,
+            scheme.quantity_tolerance, scheme.amount_tolerance, scheme.date_offset_days,
+            json.dumps(scheme.required_fields), json.dumps(scheme.ignored_fields),
+            1 if scheme.is_active else 0, now, scheme.id
+        ))
+    
+    return scheme.id
+
 def import_rule_schemes_atomic(schemes_data: List[Dict[str, Any]], 
-                               conflict_action: str = 'skip') -> tuple:
+                               conflict_action: str = 'skip',
+                               file_path: str = '',
+                               operator: str = '',
+                               operator_role: str = '') -> tuple:
     conn = get_connection()
     cursor = conn.cursor()
     imported = 0
@@ -733,6 +771,9 @@ def import_rule_schemes_atomic(schemes_data: List[Dict[str, Any]],
     overwritten = 0
     renamed = 0
     errors = []
+    final_results = []
+    import_batch_no = generate_import_batch_no()
+    now = datetime.now().isoformat()
     
     try:
         cursor.execute('BEGIN TRANSACTION')
@@ -740,81 +781,158 @@ def import_rule_schemes_atomic(schemes_data: List[Dict[str, Any]],
         for data in schemes_data:
             try:
                 scheme = RuleScheme.from_dict(data)
-                existing = get_rule_scheme(scheme.name)
+                original_name = scheme.name
+                
+                cursor.execute('SELECT id, is_active FROM rule_schemes WHERE name = ?', (scheme.name,))
+                row = cursor.fetchone()
+                existing = row is not None
+                
+                action = 'new'
+                final_name = scheme.name
                 
                 if existing:
+                    existing_id, existing_active = row
                     if conflict_action == 'overwrite':
-                        scheme.id = existing.id
-                        scheme.is_active = existing.is_active
-                        save_rule_scheme(scheme)
+                        scheme.id = existing_id
+                        scheme.is_active = bool(existing_active)
+                        _save_rule_scheme_with_conn(scheme, conn, cursor)
                         overwritten += 1
+                        action = 'overwrite'
                     elif conflict_action == 'rename':
                         base_name = scheme.name
                         counter = 1
-                        while get_rule_scheme(scheme.name):
-                            scheme.name = f"{base_name}_imported_{counter}"
+                        while True:
+                            new_name = f"{base_name}_imported_{counter}"
+                            cursor.execute('SELECT id FROM rule_schemes WHERE name = ?', (new_name,))
+                            if cursor.fetchone() is None:
+                                scheme.name = new_name
+                                break
                             counter += 1
                         scheme.is_active = False
-                        save_rule_scheme(scheme)
+                        _save_rule_scheme_with_conn(scheme, conn, cursor)
                         renamed += 1
+                        action = 'rename'
+                        final_name = scheme.name
                     else:
                         skipped += 1
+                        action = 'skip'
                 else:
                     scheme.is_active = False
-                    save_rule_scheme(scheme)
+                    _save_rule_scheme_with_conn(scheme, conn, cursor)
                     imported += 1
+                    action = 'new'
+                
+                final_results.append({
+                    'original_name': original_name,
+                    'final_name': final_name,
+                    'action': action,
+                    'name': final_name,
+                    'business_line': scheme.business_line,
+                    'description': scheme.description,
+                    'quantity_tolerance': scheme.quantity_tolerance,
+                    'amount_tolerance': scheme.amount_tolerance,
+                    'date_offset_days': scheme.date_offset_days,
+                    'required_fields': scheme.required_fields,
+                    'ignored_fields': scheme.ignored_fields
+                })
             except Exception as e:
                 errors.append(f"处理方案 '{data.get('name', '未知')}' 时出错: {str(e)}")
         
         if errors:
             cursor.execute('ROLLBACK')
-            conn.commit()
-            return imported, skipped, overwritten, renamed, errors
+            conn.close()
+            return imported, skipped, overwritten, renamed, errors, final_results, import_batch_no
+        
+        cursor.execute('''
+            INSERT INTO scheme_imports (
+                import_batch_no, file_path, conflict_action,
+                imported_count, skipped_count, overwritten_count, renamed_count, error_count,
+                schemes_snapshot, operator, operator_role, status, error_message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            import_batch_no, file_path, conflict_action,
+            imported, skipped, overwritten, renamed, len(errors),
+            json.dumps(final_results, ensure_ascii=False),
+            operator, operator_role, 'success', '', now
+        ))
+        import_id = cursor.lastrowid
+        
+        for scheme_data in final_results:
+            cursor.execute('''
+                INSERT INTO scheme_import_details (
+                    import_id, original_name, final_name, action, scheme_snapshot, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                import_id,
+                scheme_data.get('original_name', scheme_data.get('name', '')),
+                scheme_data.get('final_name', scheme_data.get('name', '')),
+                scheme_data.get('action', 'new'),
+                json.dumps(scheme_data, ensure_ascii=False),
+                now
+            ))
         
         cursor.execute('COMMIT')
-        conn.commit()
-        return imported, skipped, overwritten, renamed, errors
+        conn.close()
+        return imported, skipped, overwritten, renamed, errors, final_results, import_batch_no
         
     except Exception as e:
         cursor.execute('ROLLBACK')
-        conn.commit()
-        errors.append(f"事务执行失败: {str(e)}")
-        return imported, skipped, overwritten, renamed, errors
-    finally:
         conn.close()
+        errors.append(f"事务执行失败: {str(e)}")
+        return imported, skipped, overwritten, renamed, errors, final_results, import_batch_no
 
 def import_rule_schemes(schemes_data: List[Dict[str, Any]], 
                         conflict_action: str = 'skip') -> tuple:
+    conn = get_connection()
+    cursor = conn.cursor()
     imported = 0
     skipped = 0
     overwritten = 0
     renamed = 0
     
-    for data in schemes_data:
-        scheme = RuleScheme.from_dict(data)
-        existing = get_rule_scheme(scheme.name)
+    try:
+        cursor.execute('BEGIN TRANSACTION')
         
-        if existing:
-            if conflict_action == 'overwrite':
-                scheme.id = existing.id
-                scheme.is_active = existing.is_active
-                save_rule_scheme(scheme)
-                overwritten += 1
-            elif conflict_action == 'rename':
-                base_name = scheme.name
-                counter = 1
-                while get_rule_scheme(scheme.name):
-                    scheme.name = f"{base_name}_imported_{counter}"
-                    counter += 1
-                scheme.is_active = False
-                save_rule_scheme(scheme)
-                renamed += 1
+        for data in schemes_data:
+            scheme = RuleScheme.from_dict(data)
+            
+            cursor.execute('SELECT id, is_active FROM rule_schemes WHERE name = ?', (scheme.name,))
+            row = cursor.fetchone()
+            existing = row is not None
+            
+            if existing:
+                existing_id, existing_active = row
+                if conflict_action == 'overwrite':
+                    scheme.id = existing_id
+                    scheme.is_active = bool(existing_active)
+                    _save_rule_scheme_with_conn(scheme, conn, cursor)
+                    overwritten += 1
+                elif conflict_action == 'rename':
+                    base_name = scheme.name
+                    counter = 1
+                    while True:
+                        new_name = f"{base_name}_imported_{counter}"
+                        cursor.execute('SELECT id FROM rule_schemes WHERE name = ?', (new_name,))
+                        if cursor.fetchone() is None:
+                            scheme.name = new_name
+                            break
+                        counter += 1
+                    scheme.is_active = False
+                    _save_rule_scheme_with_conn(scheme, conn, cursor)
+                    renamed += 1
+                else:
+                    skipped += 1
             else:
-                skipped += 1
-        else:
-            scheme.is_active = False
-            save_rule_scheme(scheme)
-            imported += 1
+                scheme.is_active = False
+                _save_rule_scheme_with_conn(scheme, conn, cursor)
+                imported += 1
+        
+        cursor.execute('COMMIT')
+    except Exception as e:
+        cursor.execute('ROLLBACK')
+        raise
+    finally:
+        conn.close()
     
     return imported, skipped, overwritten, renamed
 

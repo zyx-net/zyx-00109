@@ -253,7 +253,7 @@ class TestSchemeImportConflict:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, 'overwrite')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(schemes_data, 'overwrite')
         
         assert errors == []
         assert overwritten == 1
@@ -304,7 +304,7 @@ class TestSchemeImportConflict:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, 'skip')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(schemes_data, 'skip')
         
         assert errors == []
         assert skipped == 1
@@ -336,7 +336,7 @@ class TestSchemeImportConflict:
             }
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, 'rename')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(schemes_data, 'rename')
         
         assert errors == []
         assert renamed == 1
@@ -365,7 +365,7 @@ class TestFailedImportRollback:
             {'invalid_field': 'missing_name'}
         ]
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, 'skip')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(schemes_data, 'skip')
         
         assert len(errors) > 0
         assert '格式错误' in errors[0] or 'missing_name' in errors[0] or 'name' in errors[0]
@@ -586,7 +586,7 @@ class TestExportReimport:
         
         delete_rule_scheme('reimport_test')
         
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic([scheme_data], 'skip')
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic([scheme_data], 'skip')
         
         assert errors == []
         assert imported == 1
@@ -660,3 +660,153 @@ class TestAuditArchiveQueries:
         result_export = next((r for r in records if r['export_type'] == 'RESULT_EXPORT'), None)
         assert result_export is not None
         assert result_export['record_count'] == 10
+
+class TestRegressionFailedImportRollback:
+    def test_failed_import_rollback_no_partial_data(self):
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_all_rule_schemes, get_all_scheme_import_records
+        )
+        
+        initial_schemes = get_all_rule_schemes()
+        initial_count = len(initial_schemes)
+        
+        schemes_data = [
+            {'name': 'valid_scheme_1', 'quantity_tolerance': 1.0},
+            {'name': 'valid_scheme_2', 'quantity_tolerance': 2.0},
+            {'invalid_field': 'missing_name'},
+            {'name': 'valid_scheme_3', 'quantity_tolerance': 3.0}
+        ]
+        
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(
+            schemes_data, 'skip', '/tmp/failed_import.json', 'test_operator', 'admin'
+        )
+        
+        assert len(errors) > 0
+        
+        after_schemes = get_all_rule_schemes()
+        after_count = len(after_schemes)
+        
+        assert after_count == initial_count, "失败导入应回滚，不应留下半截数据"
+        
+        import_records = get_all_scheme_import_records()
+        failed_record = next((r for r in import_records if r['import_batch_no'] == import_batch_no), None)
+        assert failed_record is None, "失败导入不应产生导入记录"
+
+    def test_failed_import_no_import_record_created(self):
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_all_scheme_import_records
+        )
+        
+        initial_records = get_all_scheme_import_records()
+        initial_count = len(initial_records)
+        
+        schemes_data = [
+            {'invalid_field': 'missing_name'}
+        ]
+        
+        import_rule_schemes_atomic(schemes_data, 'skip', '/tmp/failed.json', 'user', 'admin')
+        
+        after_records = get_all_scheme_import_records()
+        after_count = len(after_records)
+        
+        assert after_count == initial_count, "失败导入不应创建导入记录"
+
+class TestRegressionRuleConsistency:
+    def test_diff_check_and_batch_create_use_same_tolerance(self):
+        from purchase_reconciliation.utils import apply_tolerance
+        
+        quantity_diff = 2.5
+        amount_diff = 50.0
+        quantity_tolerance = 3.0
+        amount_tolerance = 100.0
+        
+        qty_tolerated_1, amt_tolerated_1 = apply_tolerance(quantity_diff, amount_diff, quantity_tolerance, amount_tolerance)
+        qty_tolerated_2, amt_tolerated_2 = apply_tolerance(quantity_diff, amount_diff, quantity_tolerance, amount_tolerance)
+        
+        assert qty_tolerated_1 == qty_tolerated_2, "同规则下容差判断应一致"
+        assert amt_tolerated_1 == amt_tolerated_2, "同规则下容差判断应一致"
+        
+        assert qty_tolerated_1 == True, "数量差异 2.5 应在容差 3.0 范围内"
+        assert amt_tolerated_1 == True, "金额差异 50.0 应在容差 100.0 范围内"
+
+    def test_tolerance_boundary_conditions(self):
+        from purchase_reconciliation.utils import apply_tolerance
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(3.0, 100.0, 3.0, 100.0)
+        assert qty_tolerated == True, "等于容差边界应被放过"
+        assert amt_tolerated == True, "等于容差边界应被放过"
+        
+        qty_tolerated, amt_tolerated = apply_tolerance(3.1, 100.1, 3.0, 100.0)
+        assert qty_tolerated == False, "超出容差边界不应被放过"
+        assert amt_tolerated == False, "超出容差边界不应被放过"
+
+class TestRegressionImportRecordQuery:
+    def test_import_record_created_on_success(self):
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_all_scheme_import_records, get_scheme_import_details
+        )
+        
+        schemes_data = [
+            {'name': 'query_test_scheme', 'quantity_tolerance': 5.0, 'amount_tolerance': 100.0}
+        ]
+        
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(
+            schemes_data, 'skip', '/tmp/success_import.json', 'query_user', 'admin'
+        )
+        
+        assert errors == []
+        assert imported == 1
+        
+        import_records = get_all_scheme_import_records()
+        success_record = next((r for r in import_records if r['import_batch_no'] == import_batch_no), None)
+        
+        assert success_record is not None, "成功导入应创建导入记录"
+        assert success_record['status'] == 'success'
+        assert success_record['imported_count'] == 1
+        assert success_record['operator'] == 'query_user'
+        assert success_record['operator_role'] == 'admin'
+        
+        details = get_scheme_import_details(success_record['id'])
+        assert len(details) >= 1
+        assert details[0]['original_name'] == 'query_test_scheme'
+        assert details[0]['final_name'] == 'query_test_scheme'
+        assert details[0]['action'] == 'new'
+
+    def test_import_record_has_all_fields(self):
+        from purchase_reconciliation.storage import (
+            import_rule_schemes_atomic, get_all_scheme_import_records
+        )
+        
+        schemes_data = [
+            {'name': 'complete_fields_scheme', 'business_line': '测试业务线', 
+             'description': '测试描述', 'quantity_tolerance': 1.0, 'amount_tolerance': 50.0,
+             'date_offset_days': 3, 'required_fields': ['bill_no'], 'ignored_fields': ['unit_price']}
+        ]
+        
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(
+            schemes_data, 'skip', '/tmp/complete.json', 'user', 'reviewer'
+        )
+        
+        assert errors == []
+        
+        import_records = get_all_scheme_import_records()
+        record = next((r for r in import_records if r['import_batch_no'] == import_batch_no), None)
+        
+        assert record is not None
+        assert record['file_path'] == '/tmp/complete.json'
+        assert record['conflict_action'] == 'skip'
+        assert record['skipped_count'] == 0
+        assert record['overwritten_count'] == 0
+        assert record['renamed_count'] == 0
+        assert record['error_count'] == 0
+        assert record['operator'] == 'user'
+        assert record['operator_role'] == 'reviewer'
+        
+        snapshot = record['schemes_snapshot']
+        assert len(snapshot) == 1
+        assert snapshot[0]['name'] == 'complete_fields_scheme'
+        assert snapshot[0]['business_line'] == '测试业务线'
+        assert snapshot[0]['description'] == '测试描述'
+        assert snapshot[0]['date_offset_days'] == 3
+        assert snapshot[0]['required_fields'] == ['bill_no']
+        assert snapshot[0]['ignored_fields'] == ['unit_price']

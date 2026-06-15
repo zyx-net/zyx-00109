@@ -4,7 +4,7 @@ from datetime import datetime
 from ..utils import (
     read_supplier_bill, read_receiving_list, generate_batch_no,
     validate_bill_with_required_fields, validate_receiving_with_required_fields,
-    build_matching_key, check_date_offset
+    build_matching_key, check_date_offset, apply_tolerance
 )
 from ..storage import (
     get_config, save_batch, save_diff_items, get_batch_by_no, get_all_batches,
@@ -17,12 +17,6 @@ from tabulate import tabulate
 @click.group(name='batch')
 def batch_command():
     pass
-
-def apply_tolerance(quantity_diff: float, amount_diff: float, 
-                   quantity_tolerance: float, amount_tolerance: float) -> tuple:
-    qty_tolerated = abs(quantity_diff) <= quantity_tolerance if quantity_tolerance > 0 else False
-    amt_tolerated = abs(amount_diff) <= amount_tolerance if amount_tolerance > 0 else False
-    return qty_tolerated, amt_tolerated
 
 @batch_command.command(name='create')
 @click.option('--bill-file', '-b', type=click.Path(exists=True), help='供应商账单文件路径')

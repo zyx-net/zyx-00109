@@ -8,7 +8,7 @@ from ..storage import (
     save_rule_scheme, get_rule_scheme, get_all_rule_schemes,
     get_active_rule_scheme, set_active_rule_scheme, delete_rule_scheme,
     export_all_rule_schemes, import_rule_schemes_atomic, get_config,
-    save_scheme_import_record, get_all_scheme_import_records, get_scheme_import_details,
+    get_all_scheme_import_records, get_scheme_import_details,
     get_scheme_import_record
 )
 from ..models import RuleScheme
@@ -264,7 +264,6 @@ def import_schemes(file, conflict, dry_run, operator, role):
         existing_names = [s.name for s in get_all_rule_schemes()]
         
         preview_results = []
-        final_results = []
         for item in schemes_data:
             try:
                 scheme = RuleScheme.from_dict(item)
@@ -290,20 +289,6 @@ def import_schemes(file, conflict, dry_run, operator, role):
                     'quantity_tolerance': scheme.quantity_tolerance,
                     'amount_tolerance': scheme.amount_tolerance
                 })
-                
-                final_results.append({
-                    'original_name': scheme.name,
-                    'final_name': final_name,
-                    'action': action,
-                    'name': final_name,
-                    'business_line': scheme.business_line,
-                    'description': scheme.description,
-                    'quantity_tolerance': scheme.quantity_tolerance,
-                    'amount_tolerance': scheme.amount_tolerance,
-                    'date_offset_days': scheme.date_offset_days,
-                    'required_fields': scheme.required_fields,
-                    'ignored_fields': scheme.ignored_fields
-                })
             except Exception as e:
                 click.echo(f"错误: 解析方案 '{item.get('name', '未知')}' 失败 - {str(e)}")
                 return
@@ -320,44 +305,19 @@ def import_schemes(file, conflict, dry_run, operator, role):
             return
         
         click.echo("-" * 70)
-        imported, skipped, overwritten, renamed, errors = import_rule_schemes_atomic(schemes_data, conflict)
+        imported, skipped, overwritten, renamed, errors, final_results, import_batch_no = import_rule_schemes_atomic(
+            schemes_data, conflict, file, operator or '', role or ''
+        )
         
         if errors:
             click.echo(f"\n导入过程中发生 {len(errors)} 个错误:")
             for err in errors:
                 click.echo(f"  - {err}")
             click.echo("\n回滚已完成，数据库状态未改变")
-            save_scheme_import_record(
-                file_path=file,
-                conflict_action=conflict,
-                imported_count=0,
-                skipped_count=skipped,
-                overwritten_count=0,
-                renamed_count=0,
-                error_count=len(errors),
-                schemes_snapshot=[],
-                operator=operator or '',
-                operator_role=role or '',
-                status='failed',
-                error_message='; '.join(errors)
-            )
             return
         
-        save_scheme_import_record(
-            file_path=file,
-            conflict_action=conflict,
-            imported_count=imported,
-            skipped_count=skipped,
-            overwritten_count=overwritten,
-            renamed_count=renamed,
-            error_count=0,
-            schemes_snapshot=final_results,
-            operator=operator or '',
-            operator_role=role or '',
-            status='success'
-        )
-        
         click.echo(f"导入完成:")
+        click.echo(f"  导入批次: {import_batch_no}")
         click.echo(f"  新增: {imported}")
         click.echo(f"  跳过: {skipped}")
         click.echo(f"  覆盖: {overwritten}")

@@ -4,7 +4,7 @@ from tabulate import tabulate
 from ..utils import (
     read_supplier_bill, read_receiving_list, 
     validate_bill_with_required_fields, validate_receiving_with_required_fields,
-    build_matching_key, check_date_offset
+    build_matching_key, check_date_offset, apply_tolerance
 )
 from ..storage import get_config, get_active_rule_scheme, get_rule_scheme
 from ..models import DiffItem, RuleScheme
@@ -12,12 +12,6 @@ from ..models import DiffItem, RuleScheme
 @click.group(name='diff')
 def diff_command():
     pass
-
-def apply_tolerance(quantity_diff: float, amount_diff: float, 
-                   quantity_tolerance: float, amount_tolerance: float) -> tuple:
-    qty_tolerated = abs(quantity_diff) <= quantity_tolerance if quantity_tolerance > 0 else False
-    amt_tolerated = abs(amount_diff) <= amount_tolerance if amount_tolerance > 0 else False
-    return qty_tolerated, amt_tolerated
 
 @diff_command.command(name='check')
 @click.option('--bill-file', '-b', type=click.Path(exists=True), help='供应商账单文件路径')
