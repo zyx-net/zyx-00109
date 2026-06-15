@@ -2,7 +2,7 @@ import click
 import os
 import csv
 
-from ..storage import get_batch_by_no, get_diff_items_by_batch, get_all_batches, get_audit_logs
+from ..storage import get_batch_by_no, get_diff_items_by_batch, get_all_batches, get_audit_logs, save_export_audit_record
 from ..models import AppealStatus
 from ..utils import validate_path_conflict
 
@@ -57,7 +57,18 @@ def export_result(batch_no, output):
                 item.updated_at.strftime('%Y-%m-%d %H:%M:%S') if item.updated_at else ''
             ])
     
+    save_export_audit_record(
+        export_type='RESULT_EXPORT',
+        batch_no=batch_no,
+        export_file=output,
+        record_count=len(items),
+        export_format='csv',
+        rule_snapshot=batch.scheme_snapshot,
+        note='结果导出'
+    )
+    
     click.echo(f"成功导出结果到: {output}")
+    click.echo(f"导出记录已固化到审计归档")
 
 @export_command.command(name='summary')
 @click.option('--output', '-o', required=True, type=click.Path(), help='输出文件路径')
@@ -96,7 +107,19 @@ def export_summary(output):
                 batch.lock_time.strftime('%Y-%m-%d %H:%M:%S') if batch.lock_time else ''
             ])
     
+    total_count = sum(1 for _ in batches)
+    
+    save_export_audit_record(
+        export_type='SUMMARY_EXPORT',
+        batch_no=None,
+        export_file=output,
+        record_count=total_count,
+        export_format='csv',
+        note='汇总导出'
+    )
+    
     click.echo(f"成功导出汇总到: {output}")
+    click.echo(f"导出记录已固化到审计归档")
 
 @export_command.command(name='audit')
 @click.option('--batch-no', '-b', help='批次编号（不指定则导出所有）')
@@ -137,4 +160,15 @@ def export_audit(batch_no, output):
                 log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else ''
             ])
     
+    save_export_audit_record(
+        export_type='AUDIT_EXPORT',
+        batch_no=batch_no,
+        export_file=output,
+        record_count=len(logs),
+        export_format='csv',
+        rule_snapshot=batch.scheme_snapshot if batch else None,
+        note='审计日志导出'
+    )
+    
     click.echo(f"成功导出审计日志到: {output}")
+    click.echo(f"导出记录已固化到审计归档")

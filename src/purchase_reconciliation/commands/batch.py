@@ -9,7 +9,7 @@ from ..utils import (
 from ..storage import (
     get_config, save_batch, save_diff_items, get_batch_by_no, get_all_batches,
     get_diff_items_by_batch, add_audit_log, update_diff_item_status,
-    get_active_rule_scheme, get_rule_scheme
+    get_active_rule_scheme, get_rule_scheme, save_batch_audit_record
 )
 from ..models import DiffItem, Batch, BatchStatus, AppealStatus, OperatorRole
 from tabulate import tabulate
@@ -241,6 +241,23 @@ def create_batch(bill_file, receiving_file, dry_run, operator, role, scheme, no_
     for item in diff_items:
         item.batch_id = batch_id
     save_diff_items(diff_items, batch_id)
+    
+    tolerated_rationale = f"数量容差±{quantity_tolerance}, 金额容差±{amount_tolerance}"
+    date_failed_rationale = f"日期偏移{date_offset}天"
+    
+    save_batch_audit_record(
+        batch_id=batch_id,
+        batch_no=batch_no,
+        scheme_name=scheme_name,
+        scheme_snapshot=scheme_snapshot or {},
+        tolerated_items=tolerated_count,
+        tolerated_rationale=tolerated_rationale,
+        date_failed_items=date_failed_count,
+        date_failed_rationale=date_failed_rationale,
+        intercepted_items=len(diff_items),
+        operator=operator,
+        operator_role=role
+    )
     
     note = f'创建批次，包含 {len(diff_items)} 条差异'
     if scheme_name:

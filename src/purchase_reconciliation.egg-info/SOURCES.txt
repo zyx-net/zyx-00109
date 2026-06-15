@@ -14,6 +14,7 @@ src/purchase_reconciliation.egg-info/top_level.txt
 src/purchase_reconciliation/commands/__init__.py
 src/purchase_reconciliation/commands/appeal.py
 src/purchase_reconciliation/commands/audit.py
+src/purchase_reconciliation/commands/audit_archive.py
 src/purchase_reconciliation/commands/batch.py
 src/purchase_reconciliation/commands/config_cmd.py
 src/purchase_reconciliation/commands/diff.py
@@ -22,4 +23,5 @@ src/purchase_reconciliation/commands/import_cmd.py
 src/purchase_reconciliation/commands/rollback.py
 src/purchase_reconciliation/commands/scheme_cmd.py
 src/purchase_reconciliation/commands/status.py
+tests/test_audit_archive.py
 tests/test_scheme.py

@@ -16,6 +16,8 @@
 - **回滚操作**: 支持单条或批量回滚已审批项（仅admin角色）
 - **审计日志**: 完整的操作记录追踪（含角色信息和规则快照）
 - **数据导出**: 导出结果、汇总和审计日志
+- **审计归档**: 完整的审计链路追踪，支持跨重启查询和重导出
+- **原子性导入**: 方案导入失败时整批回滚，不留半截状态
 
 ## 安装
 
@@ -78,9 +80,17 @@ purchase-recon
 ├── status      # 状态查询
 │   ├── batch       # 批次状态
 │   └── item        # 差异项状态
-└── audit       # 审计日志
+└── audit       # 审计归档
     ├── list        # 列出审计日志
-    └── summary     # 审计汇总
+    ├── summary     # 审计汇总
+    ├── batch       # 批次审计详情
+    ├── appeal      # 申诉审计记录
+    ├── rollback    # 回滚审计记录
+    ├── export-records  # 导出审计记录
+    ├── import-list # 方案导入记录
+    ├── import-detail    # 方案导入详情
+    ├── trail       # 完整审计链路
+    └── reexport    # 审计链路重导出
 ```
 
 ## 使用示例
@@ -241,6 +251,53 @@ purchase-recon audit list -b BATCH_20260615_002450
 purchase-recon audit summary
 ```
 
+### 11. 审计归档（完整链路追踪）
+
+```bash
+# 查看批次审计详情
+purchase-recon audit batch -b BATCH_20260615_002450
+
+# 查看申诉审计记录
+purchase-recon audit appeal -b BATCH_20260615_002450
+purchase-recon audit appeal  # 查看所有申诉记录
+
+# 查看回滚审计记录
+purchase-recon audit rollback -b BATCH_20260615_002450
+purchase-recon audit rollback  # 查看所有回滚记录
+
+# 查看导出审计记录
+purchase-recon audit export-records -b BATCH_20260615_002450
+purchase-recon audit export-records  # 查看所有导出记录
+
+# 查看方案导入记录
+purchase-recon audit import-list
+
+# 查看方案导入详情
+purchase-recon audit import-detail -i 1
+
+# 查看完整审计链路
+purchase-recon audit trail -b BATCH_20260615_002450
+
+# 重导出审计链路（JSON格式）
+purchase-recon audit reexport -b BATCH_20260615_002450 -o output/trail.json -f json
+
+# 重导出审计链路（CSV格式）
+purchase-recon audit reexport -b BATCH_20260615_002450 -o output/trail.csv -f csv
+
+# 重导出完整审计链路（含差异项详情）
+purchase-recon audit reexport -b BATCH_20260615_002450 -o output/trail_full.json -f full
+```
+
+### 12. 方案导入（含操作员记录）
+
+```bash
+# 导入方案并记录操作人
+purchase-recon scheme import -f output/schemes.json -c skip -o 张三 -R admin
+
+# 预览导入结果（不实际写入）
+purchase-recon scheme import -f output/schemes.json --dry-run
+```
+
 ## 方案参数说明
 
 创建方案时可配置以下参数：
@@ -274,6 +331,93 @@ purchase-recon scheme import -f output/schemes.json -c overwrite
 
 # 导入方案（重命名同名方案）
 purchase-recon scheme import -f output/schemes.json -c rename
+```
+
+## 审计归档功能
+
+### 概述
+
+审计归档模块提供完整的审计链路追踪功能，确保：
+1. **操作可追溯**: 所有操作都记录了关键快照和决定依据
+2. **跨重启持久**: 所有审计记录存储在数据库中，重启后可查
+3. **完整链路**: 从批次创建到申诉、审批、回滚、导出全程可查
+4. **重导出能力**: 导出的方案可原样再导入，审计链路可重导出
+
+### 审计归档包含的记录类型
+
+| 记录类型 | 说明 | 查询命令 |
+|----------|------|----------|
+| 批次审计 | 创建批次时的规则快照和处理结果 | `audit batch` |
+| 申诉审计 | 发起、审批、拒绝申诉的决定依据 | `audit appeal` |
+| 回滚审计 | 回滚操作的依据和关联的申诉记录 | `audit rollback` |
+| 导出审计 | 导出操作的记录和文件信息 | `audit export-records` |
+| 导入审计 | 方案导入的冲突处理记录 | `audit import-list` |
+
+### 关键快照包含的信息
+
+批次创建时的快照包含：
+- 方案名称和规则参数
+- 数量容差和金额容差
+- 日期偏移设置
+- 必填/忽略字段
+- 容差放过的项数和依据
+- 日期超出偏移的项数和依据
+- 拦截的差异项数
+
+申诉审批时的快照包含：
+- 差异项的基本信息
+- 数量差异和金额差异
+- 原状态和新状态
+- 决定依据/备注
+- 操作人和角色
+- 当时的规则快照
+
+回滚时的快照包含：
+- 回滚的差异项信息
+- 回滚原因
+- 回滚前的状态
+- 关联的申诉审批记录
+- 当时的规则快照
+
+### 完整审计链路示例
+
+```
+批次 BATCH_001 完整审计链路:
+================================
+
+1. 批次信息:
+   批次编号: BATCH_001
+   状态: open
+   方案: strict
+   创建时间: 2026-06-15T10:00:00
+
+   规则快照:
+     数量容差: 0
+     金额容差: 0
+     日期偏移: 0 天
+
+2. 批次处理审计:
+   拦截项数: 10
+   容差放过: 2 条
+   日期失败: 1 条
+
+3. 申诉审计 (5 条):
+   - ITEM001: 发起 | 张三 | 10:05:00
+   - ITEM001: 审批通过 | 李四 | 10:10:00
+   - ITEM002: 发起 | 张三 | 10:05:00
+   - ITEM002: 拒绝 | 李四 | 10:15:00
+   - ITEM003: 发起 | 张三 | 10:05:00
+
+4. 回滚审计 (1 条):
+   - ITEM001: 回滚 | 王五 | 10:20:00
+
+5. 导出审计 (1 条):
+   - RESULT_EXPORT: 10 条 | /tmp/result.csv
+
+6. 操作日志 (8 条):
+   - CREATE_BATCH | 张三 | 10:00:00
+   - INITIATE_APPEAL | 张三 | 10:05:00
+   - ...
 ```
 
 ### 规则快照功能
@@ -452,6 +596,7 @@ purchase-recon rollback check -b BATCH_xxx
 cd d:/workSpace/AI__SPACE/zyx-00109
 pip install pytest
 pytest tests/test_scheme.py -v
+pytest tests/test_audit_archive.py -v
 ```
 
 ### 回归测试
@@ -459,4 +604,31 @@ pytest tests/test_scheme.py -v
 ```bash
 cd d:/workSpace/AI__SPACE/zyx-00109
 bash tests/regression_tests.sh
+```
+
+### 审计归档测试覆盖
+
+测试覆盖以下场景：
+- 导入冲突处理（覆盖/跳过/改名）
+- 失败导入回滚
+- 跨重启查询
+- 审计链路重导出
+- UTF-8 BOM JSON 和普通 JSON 解析
+- 导出文件再导入
+
+```bash
+# 运行审计归档专项测试
+pytest tests/test_audit_archive.py -v
+
+# 测试导入冲突
+pytest tests/test_audit_archive.py::TestSchemeImportConflict -v
+
+# 测试失败回滚
+pytest tests/test_audit_archive.py::TestFailedImportRollback -v
+
+# 测试跨重启查询
+pytest tests/test_audit_archive.py::TestCrossRestartQuery -v
+
+# 测试完整审计链路
+pytest tests/test_audit_archive.py::TestAuditReexport -v
 ```

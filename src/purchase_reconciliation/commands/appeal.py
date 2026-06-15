@@ -3,7 +3,7 @@ from tabulate import tabulate
 
 from ..storage import (
     get_batch_by_no, get_diff_items_by_batch, update_diff_item_status,
-    get_diff_item, add_audit_log
+    get_diff_item, add_audit_log, save_appeal_audit_record, get_batch_audit_record
 )
 from ..models import AppealStatus, BatchStatus, OperatorRole
 
@@ -72,6 +72,22 @@ def initiate_appeal(batch_no, operator, role, item_id, note):
     
     for item in items_to_appeal:
         update_diff_item_status(item.id, AppealStatus.PENDING, operator, role, note or '')
+        
+        save_appeal_audit_record(
+            batch_id=batch.id,
+            batch_no=batch_no,
+            item_id=item.id,
+            item_code=item.item_code,
+            item_name=item.item_name,
+            quantity_diff=item.quantity_diff,
+            amount_diff=item.amount_diff,
+            original_status=item.status.value,
+            action='INITIATE',
+            decision_rationale=note or f'发起申诉: {item.appeal_note}',
+            rule_snapshot=batch.scheme_snapshot,
+            operator=operator,
+            operator_role=role
+        )
     
     add_audit_log(
         batch.id, batch_no, 'INITIATE_APPEAL', operator, role,
@@ -81,6 +97,7 @@ def initiate_appeal(batch_no, operator, role, item_id, note):
     
     click.echo(f"成功对 {len(items_to_appeal)} 条差异项发起申诉")
     click.echo(f"操作人: {operator} | 角色: {role}")
+    click.echo(f"申诉记录已固化到审计归档")
 
 @appeal_command.command(name='approve')
 @click.option('--batch-no', '-b', required=True, help='批次编号')
@@ -137,6 +154,22 @@ def approve_appeal(batch_no, operator, role, item_id, note):
             click.echo(f"跳过: 差异项 {item.id} 已回滚，无法审批")
             continue
         update_diff_item_status(item.id, AppealStatus.APPROVED, operator, role, note or '')
+        
+        save_appeal_audit_record(
+            batch_id=batch.id,
+            batch_no=batch_no,
+            item_id=item.id,
+            item_code=item.item_code,
+            item_name=item.item_name,
+            quantity_diff=item.quantity_diff,
+            amount_diff=item.amount_diff,
+            original_status=item.status.value,
+            action='APPROVE',
+            decision_rationale=note or '审批通过',
+            rule_snapshot=batch.scheme_snapshot,
+            operator=operator,
+            operator_role=role
+        )
         approved_count += 1
     
     add_audit_log(
@@ -147,6 +180,7 @@ def approve_appeal(batch_no, operator, role, item_id, note):
     
     click.echo(f"成功审批通过 {approved_count} 条差异项")
     click.echo(f"操作人: {operator} | 角色: {role}")
+    click.echo(f"审批记录已固化到审计归档")
 
 @appeal_command.command(name='reject')
 @click.option('--batch-no', '-b', required=True, help='批次编号')
@@ -193,6 +227,22 @@ def reject_appeal(batch_no, operator, role, item_id, note):
     
     for item in items_to_reject:
         update_diff_item_status(item.id, AppealStatus.REJECTED, operator, role, note or '')
+        
+        save_appeal_audit_record(
+            batch_id=batch.id,
+            batch_no=batch_no,
+            item_id=item.id,
+            item_code=item.item_code,
+            item_name=item.item_name,
+            quantity_diff=item.quantity_diff,
+            amount_diff=item.amount_diff,
+            original_status=item.status.value,
+            action='REJECT',
+            decision_rationale=note or '拒绝申诉',
+            rule_snapshot=batch.scheme_snapshot,
+            operator=operator,
+            operator_role=role
+        )
     
     add_audit_log(
         batch.id, batch_no, 'REJECT_APPEAL', operator, role,
@@ -202,6 +252,7 @@ def reject_appeal(batch_no, operator, role, item_id, note):
     
     click.echo(f"成功拒绝 {len(items_to_reject)} 条差异项")
     click.echo(f"操作人: {operator} | 角色: {role}")
+    click.echo(f"拒绝记录已固化到审计归档")
 
 @appeal_command.command(name='list')
 @click.option('--batch-no', '-b', required=True, help='批次编号')

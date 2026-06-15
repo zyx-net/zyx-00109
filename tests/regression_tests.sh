@@ -246,35 +246,80 @@ echo ""
 purchase-recon audit list
 echo ""
 
-echo "=== 14. 跨进程查询测试 ==="
+echo "=== 14. 测试审计归档功能 ==="
 echo ""
-echo "--- 14.1 重启后查询批次 ---"
+echo "--- 14.1 查看批次审计详情 ---"
+purchase-recon audit batch -b "$BATCH_NO"
+echo ""
+
+echo "--- 14.2 查看申诉审计记录 ---"
+purchase-recon audit appeal -b "$BATCH_NO"
+echo ""
+
+echo "--- 14.3 查看回滚审计记录 ---"
+purchase-recon audit rollback -b "$BATCH_NO"
+echo ""
+
+echo "--- 14.4 查看导出审计记录 ---"
+purchase-recon audit export-records
+echo ""
+
+echo "--- 14.5 查看方案导入记录 ---"
+purchase-recon audit import-list
+echo ""
+
+echo "--- 14.6 查看完整审计链路 ---"
+purchase-recon audit trail -b "$BATCH_NO"
+echo ""
+
+echo "--- 14.7 重导出审计链路 ---"
+purchase-recon audit reexport -b "$BATCH_NO" -o output/trail_test.json -f json
+echo ""
+
+echo "=== 15. 跨进程查询测试 ==="
+echo ""
+echo "--- 15.1 重启后查询批次 ---"
 purchase-recon batch list
 echo ""
 
-echo "--- 14.2 查询申诉状态 ---"
+echo "--- 15.2 查询申诉状态 ---"
 purchase-recon appeal list -b "$BATCH_NO"
 echo ""
 
-echo "--- 14.3 重启后查询方案 ---"
+echo "--- 15.3 重启后查询方案 ---"
 purchase-recon scheme list
 echo ""
 
-echo "=== 15. 测试删除方案 ==="
+echo "--- 15.4 重启后查询审计归档 ---"
+purchase-recon audit trail -b "$BATCH_NO"
 echo ""
-echo "--- 15.1 删除非激活方案 ---"
+
+echo "=== 16. 测试方案导入（含操作员记录） ==="
+echo ""
+echo "--- 16.1 导入方案并记录操作人 ---"
+purchase-recon scheme import -f output/schemes_export.json -c skip -o 张三 -R admin
+echo ""
+
+echo "--- 16.2 查看导入记录 ---"
+purchase-recon audit import-list
+echo ""
+
+echo "=== 17. 测试删除方案 ==="
+echo ""
+echo "--- 17.1 删除非激活方案 ---"
 purchase-recon scheme delete -n to_overwrite -f
 echo ""
 
-echo "--- 15.2 查看方案列表 ---"
+echo "--- 17.2 查看方案列表 ---"
 purchase-recon scheme list
 echo ""
 
-echo "=== 16. 清理测试文件 ==="
+echo "=== 18. 清理测试文件 ==="
 rm -f samples/test_date_fail_bill.csv
 rm -f samples/test_date_fail_receiving.csv
 rm -f samples/test_tolerance_bill.csv
 rm -f samples/test_tolerance_receiving.csv
+rm -f output/trail_test.json
 echo ""
 
 echo "============================================"

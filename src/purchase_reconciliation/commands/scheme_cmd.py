@@ -1,11 +1,15 @@
 import click
 import json
+import os
 from tabulate import tabulate
+from datetime import datetime
 
 from ..storage import (
     save_rule_scheme, get_rule_scheme, get_all_rule_schemes,
     get_active_rule_scheme, set_active_rule_scheme, delete_rule_scheme,
-    export_all_rule_schemes, import_rule_schemes_atomic, get_config
+    export_all_rule_schemes, import_rule_schemes_atomic, get_config,
+    save_scheme_import_record, get_all_scheme_import_records, get_scheme_import_details,
+    get_scheme_import_record
 )
 from ..models import RuleScheme
 
@@ -22,6 +26,31 @@ def read_json_file_with_bom(file_path):
             content = raw_content.decode('utf-8-sig')
     
     return json.loads(content)
+
+def validate_json_structure(data: dict) -> tuple:
+    if not isinstance(data, dict):
+        return False, "文件根节点必须是对象"
+    
+    if 'schemes' not in data:
+        return False, "缺少 'schemes' 字段"
+    
+    schemes = data.get('schemes', [])
+    if not isinstance(schemes, list):
+        return False, "'schemes' 必须是数组"
+    
+    for i, scheme in enumerate(schemes):
+        if not isinstance(scheme, dict):
+            return False, f"第 {i+1} 个方案必须是对象"
+        
+        if 'name' not in scheme:
+            return False, f"第 {i+1} 个方案缺少 'name' 字段"
+        
+        try:
+            RuleScheme.from_dict(scheme)
+        except Exception as e:
+            return False, f"第 {i+1} 个方案 '{scheme.get('name', '未知')}' 格式错误: {str(e)}"
+    
+    return True, ""
 
 @click.group(name='scheme')
 def scheme_command():
@@ -216,8 +245,15 @@ def export_schemes(output):
               default='skip',
               help='遇到同名方案时的处理方式: overwrite(覆盖), skip(跳过), rename(改名)')
 @click.option('--dry-run', '-d', is_flag=True, help='仅预览导入结果，不实际写入')
-def import_schemes(file, conflict, dry_run):
+@click.option('--operator', '-o', help='操作人')
+@click.option('--role', '-R', help='操作者角色')
+def import_schemes(file, conflict, dry_run, operator, role):
     try:
+        is_valid, error_msg = validate_json_structure_check(file)
+        if not is_valid:
+            click.echo(f"错误: {error_msg}")
+            return
+        
         data = read_json_file_with_bom(file)
         
         schemes_data = data.get('schemes', [])
@@ -228,29 +264,49 @@ def import_schemes(file, conflict, dry_run):
         existing_names = [s.name for s in get_all_rule_schemes()]
         
         preview_results = []
+        final_results = []
         for item in schemes_data:
-            scheme = RuleScheme.from_dict(item)
-            action = 'new'
-            final_name = scheme.name
-            if scheme.name in existing_names:
-                if conflict == 'skip':
-                    action = 'skip'
-                elif conflict == 'overwrite':
-                    action = 'overwrite'
-                elif conflict == 'rename':
-                    action = 'rename'
-                    base_name = scheme.name
-                    counter = 1
-                    while f"{base_name}_imported_{counter}" in existing_names:
-                        counter += 1
-                    final_name = f"{base_name}_imported_{counter}"
-            preview_results.append({
-                'original': scheme.name,
-                'action': action,
-                'final_name': final_name,
-                'quantity_tolerance': scheme.quantity_tolerance,
-                'amount_tolerance': scheme.amount_tolerance
-            })
+            try:
+                scheme = RuleScheme.from_dict(item)
+                action = 'new'
+                final_name = scheme.name
+                if scheme.name in existing_names:
+                    if conflict == 'skip':
+                        action = 'skip'
+                    elif conflict == 'overwrite':
+                        action = 'overwrite'
+                    elif conflict == 'rename':
+                        action = 'rename'
+                        base_name = scheme.name
+                        counter = 1
+                        while f"{base_name}_imported_{counter}" in existing_names:
+                            counter += 1
+                        final_name = f"{base_name}_imported_{counter}"
+                
+                preview_results.append({
+                    'original': scheme.name,
+                    'action': action,
+                    'final_name': final_name,
+                    'quantity_tolerance': scheme.quantity_tolerance,
+                    'amount_tolerance': scheme.amount_tolerance
+                })
+                
+                final_results.append({
+                    'original_name': scheme.name,
+                    'final_name': final_name,
+                    'action': action,
+                    'name': final_name,
+                    'business_line': scheme.business_line,
+                    'description': scheme.description,
+                    'quantity_tolerance': scheme.quantity_tolerance,
+                    'amount_tolerance': scheme.amount_tolerance,
+                    'date_offset_days': scheme.date_offset_days,
+                    'required_fields': scheme.required_fields,
+                    'ignored_fields': scheme.ignored_fields
+                })
+            except Exception as e:
+                click.echo(f"错误: 解析方案 '{item.get('name', '未知')}' 失败 - {str(e)}")
+                return
         
         click.echo(f"导入预览 ({len(preview_results)} 个方案):")
         click.echo("-" * 70)
@@ -271,18 +327,54 @@ def import_schemes(file, conflict, dry_run):
             for err in errors:
                 click.echo(f"  - {err}")
             click.echo("\n回滚已完成，数据库状态未改变")
+            save_scheme_import_record(
+                file_path=file,
+                conflict_action=conflict,
+                imported_count=0,
+                skipped_count=skipped,
+                overwritten_count=0,
+                renamed_count=0,
+                error_count=len(errors),
+                schemes_snapshot=[],
+                operator=operator or '',
+                operator_role=role or '',
+                status='failed',
+                error_message='; '.join(errors)
+            )
             return
+        
+        save_scheme_import_record(
+            file_path=file,
+            conflict_action=conflict,
+            imported_count=imported,
+            skipped_count=skipped,
+            overwritten_count=overwritten,
+            renamed_count=renamed,
+            error_count=0,
+            schemes_snapshot=final_results,
+            operator=operator or '',
+            operator_role=role or '',
+            status='success'
+        )
         
         click.echo(f"导入完成:")
         click.echo(f"  新增: {imported}")
         click.echo(f"  跳过: {skipped}")
         click.echo(f"  覆盖: {overwritten}")
         click.echo(f"  改名: {renamed}")
+        click.echo(f"  导入记录已保存，可通过 audit import-list 查看")
         
     except json.JSONDecodeError as e:
         click.echo(f"错误: 文件格式不正确，无法解析 JSON - {str(e)}")
     except Exception as e:
         click.echo(f"错误: 导入失败 - {str(e)}")
+
+def validate_json_structure_check(file_path):
+    try:
+        data = read_json_file_with_bom(file_path)
+        return validate_json_structure(data)
+    except Exception as e:
+        return False, f"读取文件失败: {str(e)}"
 
 @scheme_command.command(name='active')
 def show_active():

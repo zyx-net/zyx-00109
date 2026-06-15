@@ -4,7 +4,8 @@ from tabulate import tabulate
 
 from ..storage import (
     get_batch_by_no, get_diff_items_by_batch, update_diff_item_status,
-    get_diff_item, add_audit_log, is_batch_rollback_conflict, has_pending_items
+    get_diff_item, add_audit_log, is_batch_rollback_conflict, has_pending_items,
+    save_rollback_audit_record, get_appeal_audit_records_by_batch
 )
 from ..models import AppealStatus, BatchStatus, OperatorRole
 
@@ -79,7 +80,26 @@ def rollback_item(batch_no, item_id, operator, role, note):
         click.echo(f"错误: 差异项 {item_id} 当前状态为 {item.status.value}，只有已审批通过的项才能回滚")
         return
     
+    previous_status = item.status.value
+    
+    appeal_audits = get_appeal_audit_records_by_batch(batch.id)
+    related_appeal = next((a for a in appeal_audits if a['item_id'] == item_id and a['action'] == 'APPROVE'), None)
+    
     update_diff_item_status(item_id, AppealStatus.ROLLED_BACK, operator, role, note or '')
+    
+    save_rollback_audit_record(
+        batch_id=batch.id,
+        batch_no=batch_no,
+        item_id=item_id,
+        item_code=item.item_code,
+        item_name=item.item_name,
+        rollback_reason=note or '',
+        previous_status=previous_status,
+        rule_snapshot=batch.scheme_snapshot,
+        appeal_audit_id=related_appeal['id'] if related_appeal else None,
+        operator=operator,
+        operator_role=role
+    )
     
     add_audit_log(
         batch.id, batch_no, 'ROLLBACK_ITEM', operator, role,
@@ -89,6 +109,7 @@ def rollback_item(batch_no, item_id, operator, role, note):
     
     click.echo(f"成功回滚差异项: {item_id}")
     click.echo(f"操作人: {operator} | 角色: {role}")
+    click.echo(f"回滚记录已固化到审计归档")
 
 @rollback_command.command(name='batch')
 @click.option('--batch-no', '-b', required=True, help='批次编号')
@@ -121,8 +142,27 @@ def rollback_batch(batch_no, operator, role, note):
         click.echo(f"批次 {batch_no} 没有已审批通过的差异项可回滚")
         return
     
+    appeal_audits = get_appeal_audit_records_by_batch(batch.id)
+    
     for item in approved_items:
+        previous_status = item.status.value
+        related_appeal = next((a for a in appeal_audits if a['item_id'] == item.id and a['action'] == 'APPROVE'), None)
+        
         update_diff_item_status(item.id, AppealStatus.ROLLED_BACK, operator, role, note or '')
+        
+        save_rollback_audit_record(
+            batch_id=batch.id,
+            batch_no=batch_no,
+            item_id=item.id,
+            item_code=item.item_code,
+            item_name=item.item_name,
+            rollback_reason=note or '',
+            previous_status=previous_status,
+            rule_snapshot=batch.scheme_snapshot,
+            appeal_audit_id=related_appeal['id'] if related_appeal else None,
+            operator=operator,
+            operator_role=role
+        )
     
     add_audit_log(
         batch.id, batch_no, 'ROLLBACK_BATCH', operator, role,
@@ -131,6 +171,7 @@ def rollback_batch(batch_no, operator, role, note):
     
     click.echo(f"成功回滚批次 {batch_no} 中 {len(approved_items)} 条已审批项")
     click.echo(f"操作人: {operator} | 角色: {role}")
+    click.echo(f"回滚记录已固化到审计归档")
 
 @rollback_command.command(name='check')
 @click.option('--batch-no', '-b', required=True, help='批次编号')

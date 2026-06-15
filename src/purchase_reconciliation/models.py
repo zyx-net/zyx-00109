@@ -236,3 +236,119 @@ class ValidationResult:
         for err in self.errors:
             lines.append(f"  行 {err.row}: [{err.error_type}] {err.field}={err.value} - {err.message}")
         return "\n".join(lines)
+
+@dataclass
+class SchemeImportRecord:
+    import_batch_no: str
+    file_path: str
+    conflict_action: str
+    imported_count: int = 0
+    skipped_count: int = 0
+    overwritten_count: int = 0
+    renamed_count: int = 0
+    error_count: int = 0
+    schemes_snapshot: List[Dict[str, Any]] = field(default_factory=list)
+    operator: str = ""
+    operator_role: str = ""
+    status: str = "success"
+    error_message: str = ""
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class SchemeImportDetail:
+    import_id: int
+    original_name: str
+    final_name: str
+    action: str
+    scheme_snapshot: Dict[str, Any]
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class BatchAuditRecord:
+    batch_id: int
+    batch_no: str
+    scheme_name: Optional[str]
+    scheme_snapshot: Dict[str, Any]
+    operator: str
+    tolerated_items: int = 0
+    tolerated_rationale: str = ""
+    date_failed_items: int = 0
+    date_failed_rationale: str = ""
+    intercepted_items: int = 0
+    operator_role: str = ""
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class AppealAuditRecord:
+    batch_id: int
+    batch_no: str
+    item_id: int
+    item_code: str
+    item_name: str
+    quantity_diff: float
+    amount_diff: float
+    original_status: str
+    action: str
+    operator: str
+    operator_role: str
+    decision_rationale: str = ""
+    rule_snapshot: Optional[Dict[str, Any]] = None
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class RollbackAuditRecord:
+    batch_id: int
+    batch_no: str
+    item_id: int
+    item_code: str
+    item_name: str
+    previous_status: str
+    operator: str
+    operator_role: str
+    rollback_reason: str = ""
+    rule_snapshot: Optional[Dict[str, Any]] = None
+    appeal_audit_id: Optional[int] = None
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class ExportAuditRecord:
+    export_type: str
+    export_file: str
+    batch_no: Optional[str] = None
+    record_count: int = 0
+    export_format: str = "csv"
+    operator: str = ""
+    operator_role: str = ""
+    rule_snapshot: Optional[Dict[str, Any]] = None
+    note: str = ""
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+@dataclass
+class CompleteAuditTrail:
+    batch: Dict[str, Any]
+    batch_audit: Optional[Dict[str, Any]]
+    appeal_audits: List[Dict[str, Any]]
+    rollback_audits: List[Dict[str, Any]]
+    export_audits: List[Dict[str, Any]]
+    audit_logs: List[Dict[str, Any]]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'batch': self.batch,
+            'batch_audit': self.batch_audit,
+            'appeal_audits': self.appeal_audits,
+            'rollback_audits': self.rollback_audits,
+            'export_audits': self.export_audits,
+            'audit_logs': self.audit_logs
+        }
+
+class AuditExportFormat(Enum):
+    JSON = "json"
+    CSV = "csv"
+    FULL_JSON = "full_json"
