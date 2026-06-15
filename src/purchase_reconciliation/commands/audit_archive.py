@@ -248,7 +248,7 @@ def audit_import_list():
     
     table_data = []
     for imp in imports:
-        status_tag = '✓' if imp['status'] == 'success' else '✗'
+        status_tag = 'OK' if imp['status'] == 'success' else 'FAIL'
         table_data.append([
             imp['id'],
             imp['import_batch_no'],

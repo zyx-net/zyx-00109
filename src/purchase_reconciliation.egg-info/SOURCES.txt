@@ -24,4 +24,5 @@ src/purchase_reconciliation/commands/rollback.py
 src/purchase_reconciliation/commands/scheme_cmd.py
 src/purchase_reconciliation/commands/status.py
 tests/test_audit_archive.py
+tests/test_cli_acceptance.py
 tests/test_scheme.py

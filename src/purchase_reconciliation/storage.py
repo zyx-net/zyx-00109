@@ -8,7 +8,8 @@ from .models import (
     DiffItem, AppealStatus, Batch, BatchStatus, AuditLog, Config, RuleScheme
 )
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "purchase_recon.db")
+DB_PATH = os.environ.get('PURCHASE_RECON_DB_PATH', 
+                           os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "purchase_recon.db"))
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)

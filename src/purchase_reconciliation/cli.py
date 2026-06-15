@@ -2,13 +2,14 @@ import click
 import sys
 
 if sys.platform == 'win32':
-    import win32console
     try:
-        win32console.SetConsoleCP(65001)
-        win32console.SetConsoleOutputCP(65001)
+        import win32console
+        try:
+            win32console.SetConsoleCP(65001)
+            win32console.SetConsoleOutputCP(65001)
+        except Exception:
+            pass
     except ImportError:
-        pass
-    except Exception:
         pass
 
 from .commands import import_cmd, diff, batch, appeal, rollback, export, status, audit, config_cmd, scheme_cmd, audit_archive
